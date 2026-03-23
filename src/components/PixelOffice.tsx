@@ -352,30 +352,27 @@ function drawDecoration(ctx: CanvasRenderingContext2D, type: DecorationType, x: 
 }
 
 // ─── Room drawing ───────────────────────────────────────────────────────────
-const FLOOR_COLORS = ['#b8864e','#c4915a','#a87d47','#d4a06a','#be8f55'];
-const STONE_COLORS = ['#8B8682','#9E9A96','#7D7975','#928E8A','#858178'];
+// Modern light wood floor
+const FLOOR_COLORS = ['#D4B896','#CEAE88','#D9BD9C','#C9A87C','#D0B490'];
+// Accent wall colors per room — warm, modern palette
+const ACCENT_WALLS = [
+  '#5B7FA5','#7B6B8D','#6B8E6B','#B0785A','#5A8A8A','#8B6B6B','#6B7B8B','#8A7B5A',
+  '#6B8B7B','#7B6B7B','#5B8B6B','#8B7B6B','#6B6B8B','#7B8B5B','#8B5B6B','#5B7B8B',
+];
 
 function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: string, name: string, emoji: string, glowColor: string | undefined, isError: boolean, time: number) {
   const o = getRoomOrigin(roomIndex);
+  const wallH = 36;
+  const accent = ACCENT_WALLS[roomIndex % ACCENT_WALLS.length];
 
-  const plankW = 32, plankH = 12;
-  for (let y = o.y + 30; y < o.y + ROOM_H; y += plankH) {
-    const rowOff = ((y - o.y) / plankH) % 2 === 0 ? 0 : plankW / 2;
-    for (let x = o.x; x < o.x + ROOM_W; x += plankW) {
-      const px = x + rowOff;
-      const ci = (Math.floor(px / plankW) * 7 + Math.floor(y / plankH) * 13) % FLOOR_COLORS.length;
-      const base = FLOOR_COLORS[ci];
-      ctx.fillStyle = base;
-      ctx.fillRect(Math.max(o.x, Math.floor(px)), Math.floor(y), Math.min(plankW, o.x + ROOM_W - Math.floor(px)), plankH);
-      // Grain
-      const seed = (Math.floor(px / plankW) * 31 + Math.floor(y / plankH) * 17);
-      for (let g = 0; g < 2; g++) {
-        const gx = px + 3 + ((seed + g * 11) % (plankW - 6));
-        const gy = y + 1 + (g * 3) % (plankH - 2);
-        if (gx >= o.x && gx < o.x + ROOM_W) {
-          drawRect(ctx, gx, gy, Math.min(6, o.x + ROOM_W - gx), 1, darken(base, 15));
-        }
-      }
+  // ── Floor: light wood herringbone ──
+  const plankW = 16, plankH = 8;
+  for (let y = o.y + wallH; y < o.y + ROOM_H; y += plankH) {
+    for (let x = o.x + 4; x < o.x + ROOM_W - 4; x += plankW) {
+      const ci = (Math.floor(x / plankW) * 3 + Math.floor(y / plankH) * 7) % FLOOR_COLORS.length;
+      const w = Math.min(plankW, o.x + ROOM_W - 4 - x);
+      drawRect(ctx, x, y, w, plankH, FLOOR_COLORS[ci]);
+      drawRect(ctx, x, y + plankH - 1, w, 1, darken(FLOOR_COLORS[ci], 12));
     }
   }
 
@@ -383,54 +380,67 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   if (isError) {
     const pulse = 0.06 + Math.sin(time * 0.002) * 0.03;
     ctx.fillStyle = `rgba(239,68,68,${pulse})`;
-    ctx.fillRect(o.x, o.y + 30, ROOM_W, ROOM_H - 30);
+    ctx.fillRect(o.x + 4, o.y + wallH, ROOM_W - 8, ROOM_H - wallH);
   }
 
-  const brickW = 24, brickH = 12;
+  // ── Walls: clean painted with accent back wall ──
+  // Back wall (top) — colored accent
+  drawRect(ctx, o.x, o.y, ROOM_W, wallH, accent);
+  // Subtle gradient on accent wall
+  const grd = ctx.createLinearGradient(o.x, o.y, o.x, o.y + wallH);
+  grd.addColorStop(0, 'rgba(255,255,255,0.12)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.08)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(o.x, o.y, ROOM_W, wallH);
 
-  // Top wall
-  for (let y = o.y; y < o.y + 30; y += brickH) {
-    const offset = ((y - o.y) / brickH) % 2 === 0 ? 0 : brickW / 2;
-    for (let x = o.x; x < o.x + ROOM_W; x += brickW) {
-      const bx = x + offset;
-      const ci = (Math.floor((bx + 999) / brickW) * 3 + Math.floor(y / brickH) * 7) % STONE_COLORS.length;
-      const clipped = Math.min(brickW, o.x + ROOM_W - bx);
-      if (clipped > 0 && bx >= o.x - brickW) {
-        drawRect(ctx, Math.max(o.x, bx), y, Math.min(clipped, brickW), brickH, STONE_COLORS[ci]);
-        drawRect(ctx, Math.max(o.x, bx), y + brickH - 1, Math.min(clipped, brickW), 1, '#6B6765');
-      }
-    }
-  }
-
-  // Left wall strip
-  drawRect(ctx, o.x, o.y, 6, ROOM_H, '#7D7975');
-  drawRect(ctx, o.x, o.y, 1, ROOM_H, '#6B6765');
-
-  // Right wall strip
-  drawRect(ctx, o.x + ROOM_W - 6, o.y, 6, ROOM_H, '#7D7975');
-  drawRect(ctx, o.x + ROOM_W - 1, o.y, 1, ROOM_H, '#6B6765');
+  // Side walls — soft warm white
+  const wallColor = '#E8E0D4';
+  const wallShadow = '#D5CCC0';
+  drawRect(ctx, o.x, o.y, 4, ROOM_H, wallColor);
+  drawRect(ctx, o.x, o.y, 1, ROOM_H, wallShadow);
+  drawRect(ctx, o.x + ROOM_W - 4, o.y, 4, ROOM_H, wallColor);
+  drawRect(ctx, o.x + ROOM_W - 1, o.y, 1, ROOM_H, wallShadow);
 
   // Bottom wall with door opening
-  const doorW = 30;
+  const doorW = 34;
   const doorX = o.x + ROOM_W / 2 - doorW / 2;
-  drawRect(ctx, o.x, o.y + ROOM_H - 6, doorX - o.x, 6, '#7D7975');
-  drawRect(ctx, doorX + doorW, o.y + ROOM_H - 6, o.x + ROOM_W - doorX - doorW, 6, '#7D7975');
+  drawRect(ctx, o.x, o.y + ROOM_H - 4, doorX - o.x, 4, wallColor);
+  drawRect(ctx, doorX + doorW, o.y + ROOM_H - 4, o.x + ROOM_W - doorX - doorW, 4, wallColor);
+  // Door frame highlight
+  drawRect(ctx, doorX - 1, o.y + ROOM_H - 4, 1, 4, '#B8A898');
+  drawRect(ctx, doorX + doorW, o.y + ROOM_H - 4, 1, 4, '#B8A898');
 
-  // Baseboard
-  drawRect(ctx, o.x + 6, o.y + 30, ROOM_W - 12, 3, '#5D4E37');
-  drawRect(ctx, o.x + 6, o.y + 30, ROOM_W - 12, 1, '#6E5C43');
+  // Baseboard — thin elegant
+  drawRect(ctx, o.x + 4, o.y + wallH, ROOM_W - 8, 2, '#C4B5A5');
 
-  // Nameplate on top wall
+  // ── Ceiling light (warm glow on floor) ──
+  ctx.fillStyle = 'rgba(255,245,220,0.04)';
+  ctx.beginPath();
+  ctx.ellipse(o.x + ROOM_W / 2, o.y + ROOM_H / 2 + 20, 60, 40, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Light fixture on ceiling
+  drawRect(ctx, o.x + ROOM_W / 2 - 8, o.y + 2, 16, 3, '#F5F0E8');
+  drawRect(ctx, o.x + ROOM_W / 2 - 5, o.y + 5, 10, 2, '#E8E0D0');
+
+  // ── Nameplate: modern frosted glass style ──
   const plateTxt = `${emoji} ${name}`;
-  ctx.font = 'bold 9px monospace';
+  ctx.font = 'bold 10px sans-serif';
   const tw = ctx.measureText(plateTxt).width;
-  const plateX = o.x + ROOM_W / 2 - tw / 2 - 4;
-  drawRect(ctx, plateX, o.y + 8, tw + 8, 14, '#5D4037');
-  drawRect(ctx, plateX + 1, o.y + 9, tw + 6, 12, '#795548');
-  ctx.fillStyle = '#FFFDE7';
+  const plateX = o.x + ROOM_W / 2 - tw / 2 - 6;
+  // Frosted glass plate
+  drawRect(ctx, plateX, o.y + 10, tw + 12, 16, 'rgba(255,255,255,0.15)');
+  drawRect(ctx, plateX + 1, o.y + 11, tw + 10, 14, 'rgba(255,255,255,0.08)');
+  ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(plateTxt, o.x + ROOM_W / 2, o.y + 15);
+  ctx.fillText(plateTxt, o.x + ROOM_W / 2, o.y + 18);
+
+  // ── Small rug under desk area ──
+  const rugX = o.x + 70, rugY = o.y + 110;
+  const rugColor = darken(accent, 20);
+  drawRect(ctx, rugX, rugY, 80, 50, rugColor);
+  drawRect(ctx, rugX + 2, rugY + 2, 76, 46, lighten(rugColor, 10));
+  drawRect(ctx, rugX + 4, rugY + 4, 72, 42, rugColor);
 
   // Desk + chair
   const deskPos = getDeskPos(roomIndex);
@@ -440,7 +450,6 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
 
   // Decorations
   const [dec1, dec2] = getRoomDecorations(label);
-  // Place dec1 on left side, dec2 on right side of room
   drawDecoration(ctx, dec1, o.x + 15, o.y + 130, time);
   drawDecoration(ctx, dec2, o.x + ROOM_W - 55, o.y + 45, time);
 }
@@ -620,51 +629,44 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   ctx.fillText('RELAX', W / 2, posterY + 12);
 }
 
-// Draw corridors
-function drawCorridors(ctx: CanvasRenderingContext2D) {
-  const corridorColor = '#6B6358';
-  const corridorDark = '#5A534A';
+// Draw corridors — modern polished concrete with subtle pattern
+function drawCorridorTiles(ctx: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number) {
+  const tileA = '#B8B0A8';
+  const tileB = '#ADA5A0';
+  const tileSize = 20;
+  // Base fill
+  ctx.fillStyle = tileA;
+  ctx.fillRect(rx, ry, rw, rh);
+  // Checkerboard
+  for (let x = rx; x < rx + rw; x += tileSize) {
+    for (let y = ry; y < ry + rh; y += tileSize) {
+      if ((Math.floor((x - rx) / tileSize) + Math.floor((y - ry) / tileSize)) % 2 === 0) {
+        drawRect(ctx, x, y, Math.min(tileSize, rx + rw - x), Math.min(tileSize, ry + rh - y), tileB);
+      }
+    }
+  }
+  // Subtle center line
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  if (rw > rh) {
+    ctx.fillRect(rx, ry + rh / 2 - 1, rw, 2);
+  } else {
+    ctx.fillRect(rx + rw / 2 - 1, ry, 2, rh);
+  }
+}
 
-  // Horizontal corridors (between rows)
+function drawCorridors(ctx: CanvasRenderingContext2D) {
+  // Horizontal corridors
   for (let row = 0; row < ROWS - 1; row++) {
     const cy = (row + 1) * ROOM_H + row * CORRIDOR;
-    ctx.fillStyle = corridorColor;
-    ctx.fillRect(0, cy, W, CORRIDOR);
-    // Tile pattern
-    for (let x = 0; x < W; x += 20) {
-      for (let y = cy; y < cy + CORRIDOR; y += 20) {
-        if ((Math.floor(x / 20) + Math.floor((y - cy) / 20)) % 2 === 0) {
-          drawRect(ctx, x, y, 20, 20, corridorDark);
-        }
-      }
-    }
+    drawCorridorTiles(ctx, 0, cy, W, CORRIDOR);
   }
-
-  // Vertical corridors (between columns)
+  // Vertical corridors
   for (let col = 0; col < COLS - 1; col++) {
     const cx = (col + 1) * ROOM_W + col * CORRIDOR;
-    ctx.fillStyle = corridorColor;
-    ctx.fillRect(cx, 0, CORRIDOR, GRID_H);
-    for (let x = cx; x < cx + CORRIDOR; x += 20) {
-      for (let y = 0; y < GRID_H; y += 20) {
-        if ((Math.floor((x - cx) / 20) + Math.floor(y / 20)) % 2 === 0) {
-          drawRect(ctx, x, y, 20, 20, corridorDark);
-        }
-      }
-    }
+    drawCorridorTiles(ctx, cx, 0, CORRIDOR, GRID_H);
   }
-
-  // Corridor between grid and break room
-  const breakCorridorY = GRID_H;
-  ctx.fillStyle = corridorColor;
-  ctx.fillRect(0, breakCorridorY, W, CORRIDOR);
-  for (let x = 0; x < W; x += 20) {
-    for (let y = breakCorridorY; y < breakCorridorY + CORRIDOR; y += 20) {
-      if ((Math.floor(x / 20) + Math.floor((y - breakCorridorY) / 20)) % 2 === 0) {
-        drawRect(ctx, x, y, 20, 20, corridorDark);
-      }
-    }
-  }
+  // Break room corridor
+  drawCorridorTiles(ctx, 0, GRID_H, W, CORRIDOR);
 }
 
 // ─── Character drawing (same as original) ───────────────────────────────────
@@ -1229,8 +1231,8 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     }
 
     // Track mouse in world coordinates for hover
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
     const screenX = (e.clientX - rect.left) * scaleX;
     const screenY = (e.clientY - rect.top) * scaleY;
     anim.mouseX = (screenX - anim.panX) / anim.zoom;
@@ -1249,12 +1251,9 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    // Mouse position on canvas
-    const mx = (e.clientX - rect.left) * scaleX;
-    const my = (e.clientY - rect.top) * scaleY;
+    // Mouse position in virtual coords
+    const mx = (e.clientX - rect.left) * (W / rect.width);
+    const my = (e.clientY - rect.top) * (H / rect.height);
 
     const oldZoom = anim.zoom;
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
@@ -1277,7 +1276,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
 
     let lastTime = 0;
 
@@ -1495,13 +1494,15 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
 
       // ─── Draw ───
       if (!canvas) return;
-      const cw = canvas.width;
-      const ch = canvas.height;
-      ctx.clearRect(0, 0, cw, ch);
+      // Use virtual dimensions (transform already applied by resize handler)
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
 
       // Dark background behind everything
-      ctx.fillStyle = '#0a0a15';
-      ctx.fillRect(0, 0, cw, ch);
+      ctx.fillStyle = '#E8E0D4';
+      ctx.fillRect(0, 0, W, H);
 
       // Apply pan/zoom transform
       ctx.save();
@@ -1577,7 +1578,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
       ctx.restore();
 
       // ─── UI Overlays (not affected by pan/zoom) ───
-      drawMinimap(ctx, anim.agents, anim.panX, anim.panY, anim.zoom, cw, ch);
+      drawMinimap(ctx, anim.agents, anim.panX, anim.panY, anim.zoom, W, H);
 
       anim.frameId = requestAnimationFrame(render);
     }
@@ -1587,16 +1588,25 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Resize handler
+  // Resize handler — render at 2x for crisp text at any zoom
   useEffect(() => {
     const handleResize = () => {
       const container = containerRef.current;
       const canvas = canvasRef.current;
       if (!container || !canvas) return;
+      const dpr = window.devicePixelRatio || 1;
       const cw = container.clientWidth;
-      const scale = Math.min(cw / W, 1);
-      canvas.style.width = `${W * scale}px`;
-      canvas.style.height = `${H * scale}px`;
+      const displayScale = Math.min(cw / W, 1);
+      const displayW = W * displayScale;
+      const displayH = H * displayScale;
+      canvas.width = Math.floor(displayW * dpr);
+      canvas.height = Math.floor(displayH * dpr);
+      canvas.style.width = `${displayW}px`;
+      canvas.style.height = `${displayH}px`;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(dpr * displayScale, dpr * displayScale);
+      }
     };
     handleResize();
     window.addEventListener('resize', handleResize);
@@ -1607,15 +1617,13 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     <div ref={containerRef} className="w-full flex justify-center">
       <canvas
         ref={canvasRef}
-        width={W}
-        height={H}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onWheel={handleWheel}
         onDoubleClick={handleDoubleClick}
-        style={{ imageRendering: 'pixelated', cursor: 'grab' }}
+        style={{ cursor: 'grab' }}
         className="border border-gray-700 rounded-lg shadow-2xl"
       />
     </div>
