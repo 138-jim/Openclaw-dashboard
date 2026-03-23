@@ -27,6 +27,12 @@ export interface AgentState {
   model?: string;
 }
 
+export function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 export const STATE_COLORS: Record<string, string> = {
   idle: '#6b7280',
   writing: '#3b82f6',
