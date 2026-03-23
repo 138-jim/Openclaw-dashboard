@@ -35,6 +35,8 @@ export function useHealth() {
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const health = useHealth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   return (
     <div className="flex h-screen overflow-hidden text-gray-100 selection:bg-purple-500/30">
       <div
@@ -45,9 +47,42 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           animation: 'rotate-bg 60s linear infinite',
         }}
       />
+
+      {/* Hamburger button — mobile only */}
+      <button
+        onClick={() => setSidebarOpen(true)}
+        className="fixed top-4 left-4 z-40 md:hidden p-2 rounded-lg bg-white/10 backdrop-blur-sm border border-white/10 text-gray-200 hover:bg-white/15 transition-colors"
+        aria-label="Open navigation menu"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden transition-opacity"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Mobile sidebar drawer */}
+      <div
+        className={`fixed inset-y-0 left-0 z-40 w-64 transition-transform duration-300 ease-in-out md:hidden ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <Sidebar health={health} onNavClick={() => setSidebarOpen(false)} />
+      </div>
+
+      {/* Desktop sidebar */}
       <div className="hidden md:block">
         <Sidebar health={health} />
       </div>
+
       <main className="flex-1 overflow-auto relative">
         <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] pointer-events-none mix-blend-overlay"></div>
         <div className="max-w-7xl mx-auto p-8 lg:p-10 relative z-10 animate-fade-in">
