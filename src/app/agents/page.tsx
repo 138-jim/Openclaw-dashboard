@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import AgentCard from '@/components/AgentCard';
 import { useAgents } from '@/components/DashboardShell';
+import PageTransition from '@/components/PageTransition';
 
 export default function AgentsPage() {
   const agents = useAgents();
@@ -13,6 +14,7 @@ export default function AgentsPage() {
   );
 
   return (
+    <PageTransition>
     <div className="flex flex-col gap-6 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
@@ -47,5 +49,6 @@ export default function AgentsPage() {
         )}
       </div>
     </div>
+    </PageTransition>
   );
 }

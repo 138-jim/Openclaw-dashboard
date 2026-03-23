@@ -110,6 +110,15 @@ select option {
   background-clip: text;
 }
 
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-transition-child {
+  animation: page-enter 400ms ease-out both;
+}
+
 .glow-border {
   position: relative;
 }

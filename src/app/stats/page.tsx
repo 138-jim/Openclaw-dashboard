@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import StatCard from '@/components/StatCard';
+import PageTransition from '@/components/PageTransition';
 
 export default function StatsPage() {
   const [stats, setStats] = useState<Record<string, number>>({});

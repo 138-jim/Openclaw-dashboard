@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import PageTransition from '@/components/PageTransition';
 
 interface Session { agent: string; file: string; lastMessage: string; timestamp: string; tokenUsage: number; }
 
@@ -16,6 +17,7 @@ export default function SessionsPage() {
   const sessions = filter ? allSessions.filter(s => s.agent === filter) : allSessions;
 
   return (
+    <PageTransition>
     <div className="flex flex-col gap-6 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>

@@ -2,12 +2,14 @@
 import PixelOffice from '@/components/PixelOffice';
 import AgentCard from '@/components/AgentCard';
 import { useAgents, useConversations } from '@/components/DashboardShell';
+import PageTransition from '@/components/PageTransition';
 
 export default function OfficePage() {
   const agents = useAgents();
   const conversations = useConversations();
 
   return (
+    <PageTransition>
     <div className="flex flex-col gap-8 max-w-[1600px] mx-auto">
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400 mb-2">Virtual Office</h1>
@@ -45,5 +47,6 @@ export default function OfficePage() {
         </div>
       </div>
     </div>
+    </PageTransition>
   );
 }
