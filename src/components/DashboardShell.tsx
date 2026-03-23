@@ -37,6 +37,14 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const health = useHealth();
   return (
     <div className="flex h-screen overflow-hidden text-gray-100 selection:bg-purple-500/30">
+      <div
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          background: 'conic-gradient(from 0deg, rgba(139,92,246,0.15), rgba(59,130,246,0.15), rgba(139,92,246,0.15))',
+          opacity: 0.03,
+          animation: 'rotate-bg 60s linear infinite',
+        }}
+      />
       <div className="hidden md:block">
         <Sidebar health={health} />
       </div>

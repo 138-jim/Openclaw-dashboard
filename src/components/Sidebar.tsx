@@ -36,12 +36,11 @@ export default function Sidebar({ health }: { health?: string }) {
           return (
             <Link key={n.key} href={n.href}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group
-                ${isActive 
-                  ? 'bg-white/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]' 
-                  : 'text-gray-400 hover:text-gray-100 hover:bg-white/5'}`}>
+                ${isActive
+                  ? 'bg-white/10 text-white border-l-2 border-purple-400 shadow-[inset_2px_0_8px_rgba(192,132,252,0.4),inset_0_1px_1px_rgba(255,255,255,0.1)]'
+                  : 'text-gray-400 hover:text-gray-100 hover:bg-gradient-to-r hover:from-white/5 hover:to-transparent border-l-2 border-transparent'}`}>
               <span className={`text-base transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`}>{n.icon}</span>
               {n.label}
-              {isActive && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(192,132,252,0.8)]" />}
             </Link>
           );
         })}
