@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
-
-const HOME = process.env.HOME || '/Users/bellette';
-const AGENTS_DIR = path.join(HOME, '.openclaw/agents');
+import { AGENTS_DIR } from '@/lib/paths';
 
 export async function GET() {
   const stats: Record<string, number> = {};

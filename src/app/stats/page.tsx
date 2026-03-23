@@ -20,7 +20,7 @@ export default function StatsPage() {
   // Color palette for bars
   const colors = ['#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6', '#10b981'];
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) => {
     if (active && payload && payload.length) {
       return (
         <div className="glass p-3 rounded-lg border border-white/10 shadow-xl">

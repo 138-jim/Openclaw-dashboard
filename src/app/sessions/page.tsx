@@ -5,16 +5,15 @@ import { formatDistanceToNow } from 'date-fns';
 interface Session { agent: string; file: string; lastMessage: string; timestamp: string; tokenUsage: number; }
 
 export default function SessionsPage() {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [allSessions, setAllSessions] = useState<Session[]>([]);
   const [filter, setFilter] = useState('');
-  
-  useEffect(() => {
-    const url = filter ? `/api/sessions?agent=${filter}` : '/api/sessions';
-    fetch(url).then(r => r.json()).then(setSessions).catch(() => {});
-  }, [filter]);
 
-  // Extract unique agents for filter dropdown
-  const uniqueAgents = Array.from(new Set(sessions.map(s => s.agent)));
+  useEffect(() => {
+    fetch('/api/sessions').then(r => r.json()).then(setAllSessions).catch(() => {});
+  }, []);
+
+  const uniqueAgents = Array.from(new Set(allSessions.map(s => s.agent)));
+  const sessions = filter ? allSessions.filter(s => s.agent === filter) : allSessions;
 
   return (
     <div className="flex flex-col gap-6 max-w-[1600px] mx-auto">

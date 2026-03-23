@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { AGENTS, AgentState } from '@/lib/agents';
-
-const HOME = process.env.HOME || '/Users/bellette';
+import { HOME } from '@/lib/paths';
 
 export async function GET() {
   const agents: AgentState[] = await Promise.all(

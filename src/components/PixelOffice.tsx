@@ -1,17 +1,12 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback } from 'react';
-import { AgentState } from '@/lib/agents';
+import { AgentState, STATE_COLORS } from '@/lib/agents';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const W = 960, H = 540;
 const WALL_H = 160, FLOOR_Y = WALL_H + 8; // 8px baseboard
 const ZONE_W = W / 3;
-
-const STATE_COLORS: Record<string, string> = {
-  idle: '#64748b', writing: '#3b82f6', researching: '#a855f7',
-  executing: '#f59e0b', syncing: '#06b6d4', error: '#ef4444',
-};
 
 // Agent color palettes derived from name hash
 const SHIRT_COLORS = [
@@ -101,14 +96,6 @@ interface LED { x: number; y: number; color: string; rate: number; phase: number
 function drawRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) {
   ctx.fillStyle = color;
   ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
-}
-
-function drawPixelText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, size = 8) {
-  ctx.fillStyle = color;
-  ctx.font = `bold ${size}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText(text, Math.floor(x), Math.floor(y));
 }
 
 // ─── Scene drawing functions ────────────────────────────────────────────────

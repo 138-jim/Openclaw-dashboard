@@ -6,7 +6,9 @@ import { AgentState } from '@/lib/agents';
 export function useAgents() {
   const [agents, setAgents] = useState<AgentState[]>([]);
   const refresh = useCallback(() => {
-    fetch('/api/agents').then(r => r.json()).then(setAgents).catch(() => {});
+    fetch('/api/agents').then(r => r.json()).then((data: AgentState[]) => {
+      setAgents(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
+    }).catch(() => {});
   }, []);
   useEffect(() => { refresh(); const i = setInterval(refresh, 5000); return () => clearInterval(i); }, [refresh]);
   return agents;
@@ -15,7 +17,7 @@ export function useAgents() {
 export function useHealth() {
   const [health, setHealth] = useState('');
   useEffect(() => {
-    const check = () => fetch('/api/health').then(r => r.json()).then(d => setHealth(d.status)).catch(() => setHealth('error'));
+    const check = () => fetch('/api/health').then(r => r.json()).then(d => setHealth((prev: string) => prev === d.status ? prev : d.status)).catch(() => setHealth('error'));
     check(); const i = setInterval(check, 15000); return () => clearInterval(i);
   }, []);
   return health;

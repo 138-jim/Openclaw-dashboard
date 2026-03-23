@@ -7,12 +7,8 @@ export default function AgentCard({ agent, detailed = false }: { agent: AgentSta
   const normalizedState = agent.state?.toLowerCase() || 'idle';
   const config = STATUS_CONFIG[normalizedState] || STATUS_CONFIG.idle;
   
-  // Custom glow color variable for tailwind
-  const glowStyle = { '--card-glow': config.color.replace('text-', '') } as React.CSSProperties;
-
   return (
-    <div className={`glass rounded-xl p-5 flex flex-col relative overflow-hidden group transition-all duration-300 hover:-translate-y-1`}
-         style={glowStyle}>
+    <div className={`glass rounded-xl p-5 flex flex-col relative overflow-hidden group transition-all duration-300 hover:-translate-y-1`}>
       {/* Subtle background glow based on state */}
       <div className={`absolute -inset-10 opacity-0 group-hover:opacity-20 transition-opacity duration-500 blur-2xl pointer-events-none ${config.bg}`} />
       
