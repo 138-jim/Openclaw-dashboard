@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { SlackVisitor } from '@/lib/visitors';
-
-const HOME = process.env.HOME || '/Users/bellette';
-const AGENTS_DIR = path.join(HOME, '.openclaw/agents');
+import { AGENTS_DIR } from '@/lib/paths';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 
@@ -39,6 +37,13 @@ export async function GET() {
           const existing = visitors.get(id);
           const lastActive = new Date(updatedAt * 1000).toISOString();
 
+          // Try to extract avatar URL from origin metadata
+          const avatarUrl = (origin.avatarUrl as string)
+            || (origin.avatar as string)
+            || (origin.icon as string)
+            || (origin.profileImage as string)
+            || undefined;
+
           if (!existing || existing.lastActive < lastActive) {
             visitors.set(id, {
               id,
@@ -47,6 +52,7 @@ export async function GET() {
               targetAgent: agentDir,
               lastActive,
               surface: surface || provider,
+              avatarUrl: avatarUrl || existing?.avatarUrl,
             });
           }
         }

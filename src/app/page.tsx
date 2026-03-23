@@ -1,13 +1,14 @@
 'use client';
 import PixelOffice from '@/components/PixelOffice';
 import AgentCard from '@/components/AgentCard';
-import { useAgents, useConversations } from '@/components/DashboardShell';
+import { useAgents, useConversations, useVisitors } from '@/components/DashboardShell';
 import PageTransition from '@/components/PageTransition';
 import ActivityFeed from '@/components/ActivityFeed';
 
 export default function OfficePage() {
   const agents = useAgents();
   const conversations = useConversations();
+  const visitors = useVisitors();
 
   return (
     <PageTransition>
@@ -21,7 +22,7 @@ export default function OfficePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-purple-500/10 to-blue-500/5 opacity-50 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
         <div className="relative rounded-xl overflow-hidden bg-[#05050a] border border-white/5">
            <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none" />
-           <PixelOffice agents={agents} conversations={conversations} />
+           <PixelOffice agents={agents} conversations={conversations} visitors={visitors} />
         </div>
       </div>
 

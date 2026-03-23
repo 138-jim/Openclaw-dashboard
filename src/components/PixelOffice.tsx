@@ -3,6 +3,7 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { AgentState, STATE_COLORS, hashStr } from '@/lib/agents';
 import { Conversation } from '@/lib/conversations';
+import { SlackVisitor } from '@/lib/visitors';
 
 // ─── Layout Constants ────────────────────────────────────────────────────────
 const ROOM_W = 220, ROOM_H = 200;
@@ -473,6 +474,94 @@ interface AgentAnim {
   conversationId: string | null;
 }
 
+// ─── Visitor (Slack/webchat user) animation state ────────────────────────────
+interface VisitorAnim {
+  id: string; name: string; surface: string;
+  x: number; y: number; targetX: number; targetY: number;
+  shirtColor: string; skinColor: string;
+  walkFrame: number; walkTimer: number; isWalking: boolean;
+  bobOffset: number; bobTimer: number;
+  targetAgentLabel: string;
+  targetRoomIndex: number;
+  chatState: 'entering' | 'walking_to_agent' | 'chatting' | 'leaving';
+  waypoints: { x: number; y: number }[];
+  waypointIndex: number;
+  avatarImg: HTMLImageElement | null;
+  avatarLoaded: boolean;
+  avatarUrl: string | undefined;
+}
+
+const VISITOR_SHIRT_COLORS = ['#2196F3','#FF9800','#4CAF50','#E91E63','#9C27B0','#00BCD4','#FF5722','#607D8B'];
+const VISITOR_SKIN_COLORS = ['#FFCC80','#D4A574','#FFE0BD','#C68642','#8D5524','#F1C27D'];
+
+function drawVisitorCharacter(ctx: CanvasRenderingContext2D, v: VisitorAnim, time: number) {
+  const { x, y, shirtColor, skinColor, isWalking, walkFrame, bobOffset, avatarImg, avatarLoaded } = v;
+  const baseY = y + Math.floor(bobOffset);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(x - 4, y + 20, 12, 3);
+
+  const legOffset = isWalking ? [[-1, 1], [1, -1], [1, -1], [-1, 1]][walkFrame % 4] : [0, 0];
+
+  // Legs (jeans blue to differentiate from agents)
+  drawRect(ctx, x - 2, baseY + 14, 3, 6 + legOffset[0], '#1a5276');
+  drawRect(ctx, x + 3, baseY + 14, 3, 6 + legOffset[1], '#1a5276');
+  // Shoes
+  drawRect(ctx, x - 3, baseY + 19 + legOffset[0], 4, 2, '#2c3e50');
+  drawRect(ctx, x + 2, baseY + 19 + legOffset[1], 4, 2, '#2c3e50');
+
+  // Body / shirt
+  drawRect(ctx, x - 3, baseY + 6, 10, 9, shirtColor);
+  drawRect(ctx, x - 2, baseY + 7, 8, 1, lighten(shirtColor, 25));
+
+  // Arms
+  drawRect(ctx, x - 5, baseY + 7, 3, 6, shirtColor);
+  drawRect(ctx, x + 6, baseY + 7, 3, 6, shirtColor);
+  // Hands
+  drawRect(ctx, x - 5, baseY + 12, 3, 2, skinColor);
+  drawRect(ctx, x + 6, baseY + 12, 3, 2, skinColor);
+
+  // Head
+  if (avatarLoaded && avatarImg) {
+    // Draw Slack avatar as head (circular crop effect via clipping)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x + 2, baseY + 1, 6, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(avatarImg, x - 4, baseY - 5, 12, 12);
+    ctx.restore();
+    // Border around avatar
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x + 2, baseY + 1, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    // Default pixel head with different shape (rounder, no hair — distinguishes from agents)
+    drawRect(ctx, x - 3, baseY - 2, 10, 9, skinColor);
+    drawRect(ctx, x - 2, baseY - 1, 8, 7, lighten(skinColor, 15));
+    // Eyes
+    drawRect(ctx, x - 1, baseY + 2, 2, 2, '#1a1a2e');
+    drawRect(ctx, x + 3, baseY + 2, 2, 2, '#1a1a2e');
+    // Smile
+    drawRect(ctx, x, baseY + 5, 4, 1, darken(skinColor, 30));
+    // Simple cap (to differentiate from agents)
+    drawRect(ctx, x - 4, baseY - 3, 12, 3, shirtColor);
+    drawRect(ctx, x - 3, baseY - 4, 10, 2, darken(shirtColor, 20));
+  }
+
+  // Slack/surface badge icon above head
+  const badgeColor = v.surface === 'slack' ? '#4A154B' : '#2196F3';
+  drawRect(ctx, x - 1, baseY - 10, 6, 6, badgeColor);
+  drawRect(ctx, x, baseY - 9, 4, 4, lighten(badgeColor, 40));
+  // "S" or "W" letter
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 5px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(v.surface === 'slack' ? 'S' : 'W', x + 2, baseY - 5);
+}
+
 function drawCharacter(ctx: CanvasRenderingContext2D, agent: AgentAnim, time: number) {
   const { x, y, shirtColor, hairColor, hairStyle, isWalking, walkFrame, bobOffset, state, errorTimer } = agent;
   const baseY = y + Math.floor(bobOffset);
@@ -713,11 +802,12 @@ function drawMinimap(ctx: CanvasRenderingContext2D, agents: AgentAnim[], panX: n
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-export default function PixelOffice({ agents, conversations = [] }: { agents: AgentState[]; conversations?: Conversation[] }) {
+export default function PixelOffice({ agents, conversations = [], visitors = [] }: { agents: AgentState[]; conversations?: Conversation[]; visitors?: SlackVisitor[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<{
     agents: AgentAnim[];
+    visitors: VisitorAnim[];
     mouseX: number;
     mouseY: number;
     time: number;
@@ -733,6 +823,7 @@ export default function PixelOffice({ agents, conversations = [] }: { agents: Ag
     conversations: Conversation[];
   }>({
     agents: [],
+    visitors: [],
     mouseX: -999,
     mouseY: -999,
     time: 0,
@@ -752,6 +843,97 @@ export default function PixelOffice({ agents, conversations = [] }: { agents: Ag
   useEffect(() => {
     animRef.current.conversations = conversations;
   }, [conversations]);
+
+  // Sync visitor data to animation state
+  useEffect(() => {
+    const anim = animRef.current;
+    const existing = new Map(anim.visitors.map(v => [v.id, v]));
+    const currentIds = new Set(visitors.map(v => v.id));
+
+    // Remove visitors no longer active — set them to leaving
+    for (const v of anim.visitors) {
+      if (!currentIds.has(v.id) && v.chatState !== 'leaving') {
+        v.chatState = 'leaving';
+        // Walk off screen to the left
+        v.waypoints = [{ x: -30, y: v.y }];
+        v.waypointIndex = 0;
+        v.targetX = v.waypoints[0].x;
+        v.targetY = v.waypoints[0].y;
+      }
+    }
+
+    // Add or update visitors
+    for (const sv of visitors) {
+      const prev = existing.get(sv.id);
+      // Find the agent index for this visitor's target
+      const agentIdx = agents.findIndex(a => a.label === sv.targetAgent);
+      const targetRoom = agentIdx >= 0 ? agentIdx : 0;
+
+      if (prev) {
+        prev.targetAgentLabel = sv.targetAgent;
+        prev.targetRoomIndex = targetRoom;
+        prev.name = sv.name;
+        // Load avatar if URL changed
+        if (sv.avatarUrl && sv.avatarUrl !== prev.avatarUrl) {
+          prev.avatarUrl = sv.avatarUrl;
+          prev.avatarLoaded = false;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { prev.avatarImg = img; prev.avatarLoaded = true; };
+          img.src = sv.avatarUrl;
+        }
+        continue;
+      }
+
+      // New visitor — spawn at left edge of canvas, walk to agent's room
+      const h = hashStr(sv.id);
+      const entryY = 100 + (h % (H - 200));
+      const chairPos = getChairPos(targetRoom);
+
+      const newVisitor: VisitorAnim = {
+        id: sv.id, name: sv.name, surface: sv.surface || 'slack',
+        x: -20, y: entryY,
+        targetX: -20, targetY: entryY,
+        shirtColor: VISITOR_SHIRT_COLORS[h % VISITOR_SHIRT_COLORS.length],
+        skinColor: VISITOR_SKIN_COLORS[(h >> 3) % VISITOR_SKIN_COLORS.length],
+        walkFrame: 0, walkTimer: 0, isWalking: false,
+        bobOffset: 0, bobTimer: Math.random() * Math.PI * 2,
+        targetAgentLabel: sv.targetAgent,
+        targetRoomIndex: targetRoom,
+        chatState: 'entering',
+        waypoints: [],
+        waypointIndex: 0,
+        avatarImg: null, avatarLoaded: false, avatarUrl: sv.avatarUrl,
+      };
+
+      // Build path: entry point → corridor → agent's room
+      const roomOrigin = getRoomOrigin(targetRoom);
+      const doorX = roomOrigin.x + ROOM_W / 2;
+      const doorY = roomOrigin.y + ROOM_H;
+      newVisitor.waypoints = [
+        { x: 0, y: entryY },                        // Enter from left
+        { x: doorX, y: entryY },                     // Walk horizontally
+        { x: doorX, y: doorY },                      // Walk to room door
+        { x: chairPos.x + 25, y: chairPos.y + 10 },  // Stand near agent
+      ];
+      newVisitor.waypointIndex = 0;
+      newVisitor.targetX = newVisitor.waypoints[0].x;
+      newVisitor.targetY = newVisitor.waypoints[0].y;
+
+      // Load avatar image if available
+      if (sv.avatarUrl) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => { newVisitor.avatarImg = img; newVisitor.avatarLoaded = true; };
+        img.src = sv.avatarUrl;
+      }
+
+      anim.visitors.push(newVisitor);
+    }
+
+    // Clean up visitors that have left the screen
+    anim.visitors = anim.visitors.filter(v => v.x > -40 || v.chatState !== 'leaving');
+  }, [visitors, agents]);
 
   // Sync agent data to animation state
   useEffect(() => {
@@ -1024,6 +1206,42 @@ export default function PixelOffice({ agents, conversations = [] }: { agents: Ag
         a.hovered = (mx > a.x - 10 && mx < a.x + 14 && my > a.y - 10 && my < a.y + 25);
       }
 
+      // ─── Update visitors ───
+      for (const v of anim.visitors) {
+        const dx = v.targetX - v.x;
+        const dy = v.targetY - v.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 2) {
+          v.isWalking = true;
+          const speed = Math.min(1.8, dist * 0.03);
+          v.x += (dx / dist) * speed;
+          v.y += (dy / dist) * speed;
+          v.walkTimer += dt;
+          if (v.walkTimer > 160) {
+            v.walkFrame = (v.walkFrame + 1) % 4;
+            v.walkTimer = 0;
+          }
+        } else {
+          v.isWalking = false;
+          v.x = v.targetX;
+          v.y = v.targetY;
+
+          // Waypoint progression
+          if (v.waypoints.length > 0 && v.waypointIndex < v.waypoints.length - 1) {
+            v.waypointIndex++;
+            v.targetX = v.waypoints[v.waypointIndex].x;
+            v.targetY = v.waypoints[v.waypointIndex].y;
+          } else if (v.chatState === 'entering' || v.chatState === 'walking_to_agent') {
+            v.chatState = 'chatting';
+            v.waypoints = [];
+          }
+        }
+
+        v.bobTimer += dt * 0.003;
+        v.bobOffset = Math.sin(v.bobTimer) * 1.0;
+      }
+
       // ─── Draw ───
       if (!canvas) return;
       const cw = canvas.width;
@@ -1083,6 +1301,22 @@ export default function PixelOffice({ agents, conversations = [] }: { agents: Ag
         // Name label (always visible when hovered or when not in corridor)
         if (agent.hovered || agent.chatState === 'at_desk') {
           drawPixelText(ctx, `${agent.emoji} ${agent.name}`, agent.x + 2, agent.y + 22, '#fff', 8);
+        }
+      }
+
+      // ─── Draw visitors ───
+      const sortedVisitors = [...anim.visitors].sort((a, b) => a.y - b.y);
+      for (const v of sortedVisitors) {
+        drawVisitorCharacter(ctx, v, timestamp);
+
+        // Name label
+        const badgeIcon = v.surface === 'slack' ? '#' : '@';
+        drawPixelText(ctx, `${badgeIcon}${v.name}`, v.x + 2, v.y + 22, '#81D4FA', 7);
+
+        // Speech bubble when chatting
+        if (v.chatState === 'chatting') {
+          const bubbleText = `Hey ${v.targetAgentLabel}!`;
+          drawSpeechBubble(ctx, v.x + 2, v.y + v.bobOffset - 16, bubbleText, '#4A154B');
         }
       }
 

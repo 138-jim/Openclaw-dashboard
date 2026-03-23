@@ -5,4 +5,5 @@ export interface SlackVisitor {
   targetAgent: string;
   lastActive: string;
   surface: string;
+  avatarUrl?: string;
 }
