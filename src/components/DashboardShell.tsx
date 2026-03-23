@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import { AgentState } from '@/lib/agents';
 import { Conversation } from '@/lib/conversations';
+import { SlackVisitor } from '@/lib/visitors';
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentState[]>([]);
@@ -22,6 +23,17 @@ export function useConversations() {
   }, []);
   useEffect(() => { refresh(); const i = setInterval(refresh, 5000); return () => clearInterval(i); }, [refresh]);
   return conversations;
+}
+
+export function useVisitors() {
+  const [visitors, setVisitors] = useState<SlackVisitor[]>([]);
+  const refresh = useCallback(() => {
+    fetch('/api/visitors').then(r => r.json()).then((data: SlackVisitor[]) => {
+      setVisitors(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
+    }).catch(() => {});
+  }, []);
+  useEffect(() => { refresh(); const i = setInterval(refresh, 5000); return () => clearInterval(i); }, [refresh]);
+  return visitors;
 }
 
 export function useHealth() {

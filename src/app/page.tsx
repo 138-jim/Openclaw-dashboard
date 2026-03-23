@@ -3,6 +3,7 @@ import PixelOffice from '@/components/PixelOffice';
 import AgentCard from '@/components/AgentCard';
 import { useAgents, useConversations } from '@/components/DashboardShell';
 import PageTransition from '@/components/PageTransition';
+import ActivityFeed from '@/components/ActivityFeed';
 
 export default function OfficePage() {
   const agents = useAgents();
@@ -46,6 +47,8 @@ export default function OfficePage() {
           )}
         </div>
       </div>
+
+      <ActivityFeed />
     </div>
     </PageTransition>
   );
