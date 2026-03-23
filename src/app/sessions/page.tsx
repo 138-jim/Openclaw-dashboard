@@ -118,5 +118,6 @@ export default function SessionsPage() {
         </div>
       </div>
     </div>
+    </PageTransition>
   );
 }
