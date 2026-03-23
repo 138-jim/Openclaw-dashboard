@@ -9,10 +9,36 @@ import { SlackVisitor } from '@/lib/visitors';
 const ROOM_W = 220, ROOM_H = 200;
 const CORRIDOR = 40;
 const COLS = 4, ROWS = 4;
-const W = COLS * ROOM_W + (COLS - 1) * CORRIDOR;  // 4*220 + 3*40 = 1000
-const H = ROWS * ROOM_H + (ROWS - 1) * CORRIDOR;  // 4*200 + 3*40 = 920
+const GRID_W = COLS * ROOM_W + (COLS - 1) * CORRIDOR;  // 1000
+const GRID_H = ROWS * ROOM_H + (ROWS - 1) * CORRIDOR;  // 920
+
+// Break room below the grid
+const BREAK_ROOM_H = 180;
+const BREAK_ROOM_Y = GRID_H + CORRIDOR; // corridor gap then break room
+const W = GRID_W;
+const H = BREAK_ROOM_Y + BREAK_ROOM_H;
 
 const ACTIVE_STATES = new Set(['writing', 'researching', 'executing', 'syncing']);
+
+// Break room seating positions (agents lounge here when idle)
+const BREAK_ROOM_SEATS = [
+  { x: 80, y: BREAK_ROOM_Y + 60 },
+  { x: 160, y: BREAK_ROOM_Y + 90 },
+  { x: 240, y: BREAK_ROOM_Y + 55 },
+  { x: 320, y: BREAK_ROOM_Y + 85 },
+  { x: 400, y: BREAK_ROOM_Y + 60 },
+  { x: 480, y: BREAK_ROOM_Y + 90 },
+  { x: 560, y: BREAK_ROOM_Y + 55 },
+  { x: 640, y: BREAK_ROOM_Y + 85 },
+  { x: 720, y: BREAK_ROOM_Y + 60 },
+  { x: 800, y: BREAK_ROOM_Y + 90 },
+  { x: 130, y: BREAK_ROOM_Y + 130 },
+  { x: 270, y: BREAK_ROOM_Y + 130 },
+  { x: 410, y: BREAK_ROOM_Y + 130 },
+  { x: 550, y: BREAK_ROOM_Y + 130 },
+  { x: 690, y: BREAK_ROOM_Y + 130 },
+  { x: 830, y: BREAK_ROOM_Y + 130 },
+];
 
 // Agent color palettes derived from name hash
 const SHIRT_COLORS = [
@@ -419,6 +445,181 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   drawDecoration(ctx, dec2, o.x + ROOM_W - 55, o.y + 45, time);
 }
 
+// ─── Break Room ──────────────────────────────────────────────────────────────
+
+function getBreakRoomSeat(agentIndex: number): { x: number; y: number } {
+  return BREAK_ROOM_SEATS[agentIndex % BREAK_ROOM_SEATS.length];
+}
+
+function getBreakRoomWaypoints(fromRoom: number): { x: number; y: number }[] {
+  const door = getDoorPos(fromRoom);
+  const corridorY = door.y + CORRIDOR / 2;
+  // Walk out of room, down the corridor to the break room entrance
+  return [
+    { x: door.x, y: corridorY },
+    { x: door.x, y: BREAK_ROOM_Y - 5 },
+  ];
+}
+
+function getReturnFromBreakWaypoints(toRoom: number, currentX: number, currentY: number): { x: number; y: number }[] {
+  const door = getDoorPos(toRoom);
+  return [
+    { x: currentX, y: BREAK_ROOM_Y - 5 },
+    { x: door.x, y: BREAK_ROOM_Y - 5 },
+    { x: door.x, y: door.y + CORRIDOR / 2 },
+    { x: door.x, y: door.y },
+  ];
+}
+
+function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
+  const bx = 0, by = BREAK_ROOM_Y;
+
+  // Floor — warm carpet tiles
+  const carpetColors = ['#4A3728', '#523F30', '#463425', '#4E3B2D'];
+  for (let y = by; y < by + BREAK_ROOM_H; y += 16) {
+    for (let x = bx; x < W; x += 16) {
+      const ci = (Math.floor(x / 16) + Math.floor(y / 16)) % carpetColors.length;
+      drawRect(ctx, x, y, 16, 16, carpetColors[ci]);
+    }
+  }
+
+  // Accent rug in center
+  const rugX = W / 2 - 100, rugY = by + 50;
+  drawRect(ctx, rugX, rugY, 200, 80, '#7B1FA2');
+  drawRect(ctx, rugX + 3, rugY + 3, 194, 74, '#9C27B0');
+  drawRect(ctx, rugX + 6, rugY + 6, 188, 68, '#8E24AA');
+  // Diamond pattern
+  for (let i = 0; i < 7; i++) {
+    const dx = rugX + 20 + i * 26;
+    const dy = rugY + 35;
+    drawRect(ctx, dx, dy - 3, 3, 1, '#CE93D8');
+    drawRect(ctx, dx - 1, dy - 2, 5, 1, '#CE93D8');
+    drawRect(ctx, dx - 2, dy - 1, 7, 1, '#CE93D8');
+    drawRect(ctx, dx - 1, dy, 5, 1, '#CE93D8');
+    drawRect(ctx, dx, dy + 1, 3, 1, '#CE93D8');
+  }
+
+  // Top wall / divider
+  drawRect(ctx, bx, by - 4, W, 4, '#5D4E37');
+  drawRect(ctx, bx, by - 1, W, 1, '#6E5C43');
+
+  // "BREAK ROOM" sign on divider
+  ctx.font = 'bold 11px monospace';
+  const signText = '☕ BREAK ROOM';
+  const signW = ctx.measureText(signText).width;
+  const signX = W / 2 - signW / 2 - 6;
+  drawRect(ctx, signX, by - 18, signW + 12, 16, '#5D4037');
+  drawRect(ctx, signX + 1, by - 17, signW + 10, 14, '#795548');
+  ctx.fillStyle = '#FFF8E1';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(signText, W / 2, by - 10);
+
+  // Couch (left side)
+  const couchX = 30, couchY = by + 40;
+  drawRect(ctx, couchX, couchY + 8, 80, 16, '#6A1B9A');
+  drawRect(ctx, couchX, couchY, 80, 10, '#4A148C');
+  drawRect(ctx, couchX + 2, couchY + 2, 76, 6, '#6A1B9A');
+  drawRect(ctx, couchX - 2, couchY + 2, 4, 20, '#4A148C');
+  drawRect(ctx, couchX + 78, couchY + 2, 4, 20, '#4A148C');
+  for (let i = 0; i < 3; i++) {
+    drawRect(ctx, couchX + 3 + i * 25, couchY + 9, 23, 13, '#7B1FA2');
+    drawRect(ctx, couchX + 4 + i * 25, couchY + 10, 21, 1, lighten('#7B1FA2', 20));
+  }
+
+  // Couch (right side)
+  const couchX2 = W - 110, couchY2 = by + 40;
+  drawRect(ctx, couchX2, couchY2 + 8, 80, 16, '#6A1B9A');
+  drawRect(ctx, couchX2, couchY2, 80, 10, '#4A148C');
+  drawRect(ctx, couchX2 + 2, couchY2 + 2, 76, 6, '#6A1B9A');
+  drawRect(ctx, couchX2 - 2, couchY2 + 2, 4, 20, '#4A148C');
+  drawRect(ctx, couchX2 + 78, couchY2 + 2, 4, 20, '#4A148C');
+  for (let i = 0; i < 3; i++) {
+    drawRect(ctx, couchX2 + 3 + i * 25, couchY2 + 9, 23, 13, '#7B1FA2');
+  }
+
+  // Coffee table (center)
+  const ctX = W / 2 - 25, ctY = by + 80;
+  drawRect(ctx, ctX + 2, ctY + 8, 46, 3, 'rgba(0,0,0,0.1)');
+  drawRect(ctx, ctX + 2, ctY + 5, 2, 5, '#5D4037');
+  drawRect(ctx, ctX + 42, ctY + 5, 2, 5, '#5D4037');
+  drawRect(ctx, ctX, ctY + 3, 46, 3, '#795548');
+  drawRect(ctx, ctX + 1, ctY + 3, 44, 1, '#8D6E63');
+  // Coffee cups
+  drawRect(ctx, ctX + 10, ctY, 5, 4, '#ECEFF1');
+  drawRect(ctx, ctX + 11, ctY + 1, 3, 2, '#6D4C41');
+  drawRect(ctx, ctX + 30, ctY, 5, 4, '#ECEFF1');
+  drawRect(ctx, ctX + 31, ctY + 1, 3, 2, '#6D4C41');
+
+  // Coffee machine (left wall area)
+  const cmX = 140, cmY = by + 15;
+  drawRect(ctx, cmX, cmY, 24, 30, '#455A64');
+  drawRect(ctx, cmX + 1, cmY + 1, 22, 28, '#546E7A');
+  drawRect(ctx, cmX + 3, cmY + 3, 18, 10, '#263238');
+  drawRect(ctx, cmX + 5, cmY + 15, 3, 3, '#4CAF50');
+  drawRect(ctx, cmX + 10, cmY + 15, 3, 3, '#F44336');
+  drawRect(ctx, cmX + 6, cmY + 20, 12, 8, '#37474F');
+  drawRect(ctx, cmX + 8, cmY + 22, 8, 5, '#263238');
+  drawRect(ctx, cmX + 9, cmY + 23, 6, 4, '#ECEFF1');
+  // Steam
+  const steamPhases = [0, 2.1, 4.2];
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  for (const phase of steamPhases) {
+    const t = (time * 0.002 + phase) % 3;
+    if (t < 2) {
+      const sy = cmY - 2 - t * 6;
+      const sx = cmX + 11 + Math.sin(t * 3 + phase) * 2;
+      ctx.globalAlpha = 0.3 * (1 - t / 2);
+      ctx.fillRect(Math.floor(sx), Math.floor(sy), 2, 2);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Vending machine (right area)
+  const vmX = W - 60, vmY = by + 10;
+  drawRect(ctx, vmX, vmY, 30, 40, '#1565C0');
+  drawRect(ctx, vmX + 1, vmY + 1, 28, 38, '#1976D2');
+  drawRect(ctx, vmX + 3, vmY + 3, 24, 20, '#0D47A1');
+  // Drink slots
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const color = ['#F44336', '#FFC107', '#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#00BCD4', '#E91E63', '#8BC34A'][(r * 3 + c) % 9];
+      drawRect(ctx, vmX + 5 + c * 7, vmY + 5 + r * 6, 5, 4, color);
+    }
+  }
+  drawRect(ctx, vmX + 3, vmY + 25, 24, 12, '#0D47A1');
+  // Glow
+  ctx.fillStyle = 'rgba(33,150,243,0.05)';
+  ctx.fillRect(vmX - 3, vmY - 3, 36, 46);
+
+  // Plants scattered around
+  drawPlant(ctx, 20, by + 140);
+  drawPlant(ctx, W - 30, by + 140);
+  drawPlant(ctx, W / 2 - 80, by + 140);
+  drawPlant(ctx, W / 2 + 70, by + 140);
+
+  // Potted tree (larger plant)
+  const ptX = W / 2 + 180, ptY = by + 20;
+  drawRect(ctx, ptX, ptY + 16, 12, 10, '#D84315');
+  drawRect(ctx, ptX - 1, ptY + 15, 14, 2, '#BF360C');
+  drawRect(ctx, ptX + 1, ptY + 8, 10, 8, '#2E7D32');
+  drawRect(ctx, ptX - 2, ptY + 4, 8, 8, '#388E3C');
+  drawRect(ctx, ptX + 6, ptY + 2, 8, 8, '#43A047');
+  drawRect(ctx, ptX + 2, ptY - 2, 8, 6, '#1B5E20');
+  drawRect(ctx, ptX + 4, ptY - 4, 4, 4, '#2E7D32');
+
+  // Wall art / poster
+  const posterX = W / 2 - 15, posterY = by + 8;
+  drawRect(ctx, posterX, posterY, 30, 22, '#37474F');
+  drawRect(ctx, posterX + 2, posterY + 2, 26, 18, '#263238');
+  drawRect(ctx, posterX + 4, posterY + 4, 22, 14, '#1a1a2e');
+  // "CHILL" text on poster
+  ctx.fillStyle = '#7C4DFF';
+  ctx.font = 'bold 7px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('RELAX', W / 2, posterY + 12);
+}
+
 // Draw corridors
 function drawCorridors(ctx: CanvasRenderingContext2D) {
   const corridorColor = '#6B6358';
@@ -443,12 +644,24 @@ function drawCorridors(ctx: CanvasRenderingContext2D) {
   for (let col = 0; col < COLS - 1; col++) {
     const cx = (col + 1) * ROOM_W + col * CORRIDOR;
     ctx.fillStyle = corridorColor;
-    ctx.fillRect(cx, 0, CORRIDOR, H);
+    ctx.fillRect(cx, 0, CORRIDOR, GRID_H);
     for (let x = cx; x < cx + CORRIDOR; x += 20) {
-      for (let y = 0; y < H; y += 20) {
+      for (let y = 0; y < GRID_H; y += 20) {
         if ((Math.floor((x - cx) / 20) + Math.floor(y / 20)) % 2 === 0) {
           drawRect(ctx, x, y, 20, 20, corridorDark);
         }
+      }
+    }
+  }
+
+  // Corridor between grid and break room
+  const breakCorridorY = GRID_H;
+  ctx.fillStyle = corridorColor;
+  ctx.fillRect(0, breakCorridorY, W, CORRIDOR);
+  for (let x = 0; x < W; x += 20) {
+    for (let y = breakCorridorY; y < breakCorridorY + CORRIDOR; y += 20) {
+      if ((Math.floor(x / 20) + Math.floor((y - breakCorridorY) / 20)) % 2 === 0) {
+        drawRect(ctx, x, y, 20, 20, corridorDark);
       }
     }
   }
@@ -465,7 +678,7 @@ interface AgentAnim {
   hovered: boolean;
   roomIndex: number;
   // Chat state machine
-  chatState: 'at_desk' | 'walking_to_chat' | 'chatting' | 'walking_home';
+  chatState: 'at_desk' | 'walking_to_chat' | 'chatting' | 'walking_home' | 'walking_to_break' | 'in_break_room' | 'walking_from_break';
   chatTarget: number; // room index of chat partner
   waypoints: { x: number; y: number }[];
   waypointIndex: number;
@@ -953,9 +1166,9 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           emoji: a.emoji,
           state: a.state,
           detail: a.detail,
-          // Only update target if at_desk (not mid-chat)
-          targetX: prev.chatState === 'at_desk' ? chairPos.x : prev.targetX,
-          targetY: prev.chatState === 'at_desk' ? chairPos.y : prev.targetY,
+          // Only update target if at_desk or in_break_room (not mid-transit)
+          targetX: (prev.chatState === 'at_desk' || prev.chatState === 'in_break_room') ? chairPos.x : prev.targetX,
+          targetY: (prev.chatState === 'at_desk' || prev.chatState === 'in_break_room') ? chairPos.y : prev.targetY,
           isWalking: stateChanged ? true : prev.isWalking,
           errorTimer: a.state === 'error' ? (prev.errorTimer || 100) : 0,
           roomIndex: i,
@@ -1140,6 +1353,34 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         stayer.chatTimer = 0;
       }
 
+      // ─── Idle agents → break room, active agents → back to desk ───
+      for (const a of anim.agents) {
+        const isIdle = a.state === 'idle';
+        const isBusy = ACTIVE_STATES.has(a.state) || a.state === 'error';
+
+        if (isIdle && a.chatState === 'at_desk' && !a.conversationId) {
+          // Send idle agent to break room
+          a.chatState = 'walking_to_break';
+          const seat = getBreakRoomSeat(a.roomIndex);
+          const waypoints = getBreakRoomWaypoints(a.roomIndex);
+          waypoints.push(seat);
+          a.waypoints = waypoints;
+          a.waypointIndex = 0;
+          a.targetX = a.waypoints[0].x;
+          a.targetY = a.waypoints[0].y;
+        } else if (isBusy && (a.chatState === 'in_break_room' || a.chatState === 'walking_to_break')) {
+          // Agent became active — walk back to desk
+          a.chatState = 'walking_from_break';
+          const homeChair = getChairPos(a.roomIndex);
+          const waypoints = getReturnFromBreakWaypoints(a.roomIndex, a.x, a.y);
+          waypoints.push(homeChair);
+          a.waypoints = waypoints;
+          a.waypointIndex = 0;
+          a.targetX = a.waypoints[0].x;
+          a.targetY = a.waypoints[0].y;
+        }
+      }
+
       // ─── Update agents ───
       for (const a of anim.agents) {
         const dx = a.targetX - a.x;
@@ -1162,17 +1403,27 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           a.y = a.targetY;
 
           // Waypoint progression
-          if ((a.chatState === 'walking_to_chat' || a.chatState === 'walking_home') && a.waypoints.length > 0) {
+          const isTransit = a.chatState === 'walking_to_chat' || a.chatState === 'walking_home'
+            || a.chatState === 'walking_to_break' || a.chatState === 'walking_from_break';
+          if (isTransit && a.waypoints.length > 0) {
             a.waypointIndex++;
             if (a.waypointIndex < a.waypoints.length) {
               a.targetX = a.waypoints[a.waypointIndex].x;
               a.targetY = a.waypoints[a.waypointIndex].y;
             } else {
-              // Arrived
+              // Arrived at destination
               if (a.chatState === 'walking_to_chat') {
                 a.chatState = 'chatting';
                 a.chatTimer = 0;
+              } else if (a.chatState === 'walking_to_break') {
+                a.chatState = 'in_break_room';
+              } else if (a.chatState === 'walking_from_break') {
+                a.chatState = 'at_desk';
+                const homeChair = getChairPos(a.roomIndex);
+                a.targetX = homeChair.x;
+                a.targetY = homeChair.y;
               } else {
+                // walking_home
                 a.chatState = 'at_desk';
                 a.conversationId = null;
                 const homeChair = getChairPos(a.roomIndex);
@@ -1259,6 +1510,9 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
 
       // Draw corridors first (behind rooms)
       drawCorridors(ctx);
+
+      // Draw break room
+      drawBreakRoom(ctx, timestamp);
 
       // Draw rooms
       for (let i = 0; i < 16; i++) {
