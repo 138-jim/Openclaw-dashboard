@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import { AgentState } from '@/lib/agents';
+import { Conversation } from '@/lib/conversations';
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentState[]>([]);
@@ -12,6 +13,15 @@ export function useAgents() {
   }, []);
   useEffect(() => { refresh(); const i = setInterval(refresh, 5000); return () => clearInterval(i); }, [refresh]);
   return agents;
+}
+
+export function useConversations() {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const refresh = useCallback(() => {
+    fetch('/api/conversations').then(r => r.json()).then(setConversations).catch(() => {});
+  }, []);
+  useEffect(() => { refresh(); const i = setInterval(refresh, 5000); return () => clearInterval(i); }, [refresh]);
+  return conversations;
 }
 
 export function useHealth() {
