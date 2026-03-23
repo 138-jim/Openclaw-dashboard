@@ -96,7 +96,6 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       </div>
 
       <main className="flex-1 overflow-auto relative">
-        <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] pointer-events-none mix-blend-overlay"></div>
         <div className="max-w-7xl mx-auto p-8 lg:p-10 relative z-10 animate-fade-in">
           {children}
         </div>

@@ -1245,23 +1245,26 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     animRef.current.isPanning = false;
   }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const anim = animRef.current;
+  // Attach wheel listener natively with { passive: false } so preventDefault works
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    // Mouse position in virtual coords
-    const mx = (e.clientX - rect.left) * (W / rect.width);
-    const my = (e.clientY - rect.top) * (H / rect.height);
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const anim = animRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (W / rect.width);
+      const my = (e.clientY - rect.top) * (H / rect.height);
 
-    const oldZoom = anim.zoom;
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    anim.zoom = Math.max(0.5, Math.min(2, anim.zoom * delta));
+      const oldZoom = anim.zoom;
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      anim.zoom = Math.max(0.5, Math.min(2, anim.zoom * delta));
 
-    // Adjust pan to zoom towards mouse
-    anim.panX = mx - (mx - anim.panX) * (anim.zoom / oldZoom);
-    anim.panY = my - (my - anim.panY) * (anim.zoom / oldZoom);
+      anim.panX = mx - (mx - anim.panX) * (anim.zoom / oldZoom);
+      anim.panY = my - (my - anim.panY) * (anim.zoom / oldZoom);
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
 
   const handleDoubleClick = useCallback(() => {
@@ -1621,7 +1624,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
-        onWheel={handleWheel}
         onDoubleClick={handleDoubleClick}
         style={{ cursor: 'grab' }}
         className="border border-gray-700 rounded-lg shadow-2xl"
