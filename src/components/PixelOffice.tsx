@@ -101,7 +101,17 @@ function getDoorPos(roomIndex: number): { x: number; y: number } {
   return { x: o.x + ROOM_W / 2, y: o.y + ROOM_H };
 }
 
-// Corridor waypoints for pathfinding between rooms
+// ─── Corridor center coordinate helpers ──────────────────────────────────────
+// Horizontal corridor center Y between row r and row r+1
+function hCorridorY(row: number): number {
+  return (row + 1) * ROOM_H + row * CORRIDOR + CORRIDOR / 2;
+}
+// Vertical corridor center X between col c and col c+1
+function vCorridorX(col: number): number {
+  return (col + 1) * ROOM_W + col * CORRIDOR + CORRIDOR / 2;
+}
+
+// Corridor waypoints for pathfinding between rooms — always walks on corridors
 function getCorridorWaypoints(fromRoom: number, toRoom: number): { x: number; y: number }[] {
   const fromDoor = getDoorPos(fromRoom);
   const toDoor = getDoorPos(toRoom);
@@ -112,23 +122,31 @@ function getCorridorWaypoints(fromRoom: number, toRoom: number): { x: number; y:
 
   const waypoints: { x: number; y: number }[] = [];
 
-  // Step outside own door
-  waypoints.push({ x: fromDoor.x, y: fromDoor.y + CORRIDOR / 2 });
-
-  // Horizontal corridor (below fromRow)
-  const corridorYFrom = fromDoor.y + CORRIDOR / 2;
-  const corridorYTo = toDoor.y + CORRIDOR / 2;
+  // Step out of door into the horizontal corridor below this room's row
+  // For rows 0-2, corridor is below. For row 3 (bottom), use corridor above.
+  const exitCorridorRow = fromRow < ROWS - 1 ? fromRow : fromRow - 1;
+  const exitY = hCorridorY(exitCorridorRow);
+  waypoints.push({ x: fromDoor.x, y: exitY });
 
   if (fromRow === toRow) {
-    // Same row - just walk horizontally
-    waypoints.push({ x: toDoor.x, y: corridorYFrom });
+    // Same row — walk horizontally along the corridor to target door
+    waypoints.push({ x: toDoor.x, y: exitY });
   } else {
-    // Need vertical movement
-    // Walk to vertical corridor intersection
-    const vertCorridorX = Math.min(fromCol, toCol) * (ROOM_W + CORRIDOR) + ROOM_W + CORRIDOR / 2;
-    waypoints.push({ x: vertCorridorX, y: corridorYFrom });
-    waypoints.push({ x: vertCorridorX, y: corridorYTo });
-    waypoints.push({ x: toDoor.x, y: corridorYTo });
+    // Different rows — need to use a vertical corridor
+    // Pick the vertical corridor closest to both rooms
+    const useCol = fromCol < COLS - 1 ? fromCol : fromCol - 1;
+    const vcX = vCorridorX(useCol);
+
+    // Walk to the vertical corridor intersection
+    waypoints.push({ x: vcX, y: exitY });
+
+    // Walk vertically to the target's horizontal corridor
+    const entryCorridorRow = toRow < ROWS - 1 ? toRow : toRow - 1;
+    const entryY = hCorridorY(entryCorridorRow);
+    waypoints.push({ x: vcX, y: entryY });
+
+    // Walk horizontally to target door X
+    waypoints.push({ x: toDoor.x, y: entryY });
   }
 
   // Step into target door
@@ -362,17 +380,24 @@ const ACCENT_WALLS = [
 
 function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: string, name: string, emoji: string, glowColor: string | undefined, isError: boolean, time: number) {
   const o = getRoomOrigin(roomIndex);
-  const wallH = 36;
+  const wallH = 40;
+  const wallThick = 5;
   const accent = ACCENT_WALLS[roomIndex % ACCENT_WALLS.length];
 
-  // ── Floor: light wood herringbone ──
-  const plankW = 16, plankH = 8;
+  // ── Floor: warm hardwood ──
+  drawRect(ctx, o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, ROOM_H - wallH, '#C8B08A');
+  const plankW = 18, plankH = 9;
   for (let y = o.y + wallH; y < o.y + ROOM_H; y += plankH) {
-    for (let x = o.x + 4; x < o.x + ROOM_W - 4; x += plankW) {
-      const ci = (Math.floor(x / plankW) * 3 + Math.floor(y / plankH) * 7) % FLOOR_COLORS.length;
-      const w = Math.min(plankW, o.x + ROOM_W - 4 - x);
-      drawRect(ctx, x, y, w, plankH, FLOOR_COLORS[ci]);
-      drawRect(ctx, x, y + plankH - 1, w, 1, darken(FLOOR_COLORS[ci], 12));
+    const rowOff = ((y - o.y) / plankH) % 2 === 0 ? 0 : plankW / 2;
+    for (let x = o.x + wallThick; x < o.x + ROOM_W - wallThick; x += plankW) {
+      const px = x + rowOff;
+      if (px >= o.x + ROOM_W - wallThick) continue;
+      const ci = (Math.floor(px / plankW) * 3 + Math.floor(y / plankH) * 7) % FLOOR_COLORS.length;
+      const w = Math.min(plankW, o.x + ROOM_W - wallThick - px);
+      if (w > 0) {
+        drawRect(ctx, px, y, w, plankH, FLOOR_COLORS[ci]);
+        drawRect(ctx, px, y + plankH - 1, w, 1, darken(FLOOR_COLORS[ci], 10));
+      }
     }
   }
 
@@ -380,67 +405,89 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   if (isError) {
     const pulse = 0.06 + Math.sin(time * 0.002) * 0.03;
     ctx.fillStyle = `rgba(239,68,68,${pulse})`;
-    ctx.fillRect(o.x + 4, o.y + wallH, ROOM_W - 8, ROOM_H - wallH);
+    ctx.fillRect(o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, ROOM_H - wallH);
   }
 
-  // ── Walls: clean painted with accent back wall ──
-  // Back wall (top) — colored accent
+  // ── Back wall with accent color and window ──
   drawRect(ctx, o.x, o.y, ROOM_W, wallH, accent);
-  // Subtle gradient on accent wall
+  // Gradient overlay for depth
   const grd = ctx.createLinearGradient(o.x, o.y, o.x, o.y + wallH);
-  grd.addColorStop(0, 'rgba(255,255,255,0.12)');
-  grd.addColorStop(1, 'rgba(0,0,0,0.08)');
+  grd.addColorStop(0, 'rgba(255,255,255,0.15)');
+  grd.addColorStop(0.7, 'rgba(0,0,0,0)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.12)');
   ctx.fillStyle = grd;
   ctx.fillRect(o.x, o.y, ROOM_W, wallH);
 
-  // Side walls — soft warm white
+  // Window on back wall (shows sky blue)
+  const winW = 50, winH = 22;
+  const winX = o.x + ROOM_W - 70, winY = o.y + 6;
+  drawRect(ctx, winX - 1, winY - 1, winW + 2, winH + 2, darken(accent, 15)); // frame
+  drawRect(ctx, winX, winY, winW, winH, '#87CEEB'); // sky
+  drawRect(ctx, winX, winY + winH - 6, winW, 6, '#98D8C8'); // distant hills
+  drawRect(ctx, winX + winW / 2, winY, 1, winH, darken(accent, 10)); // divider
+  drawRect(ctx, winX, winY + winH / 2, winW, 1, darken(accent, 10));
+  // Sunlight glow on floor from window
+  ctx.fillStyle = 'rgba(255,250,220,0.06)';
+  ctx.fillRect(o.x + ROOM_W - 90, o.y + wallH, 70, 60);
+
+  // ── Side walls — clean warm tone ──
   const wallColor = '#E8E0D4';
-  const wallShadow = '#D5CCC0';
-  drawRect(ctx, o.x, o.y, 4, ROOM_H, wallColor);
+  const wallHighlight = '#F0EAE0';
+  const wallShadow = '#D0C8BC';
+  // Left wall
+  drawRect(ctx, o.x, o.y, wallThick, ROOM_H, wallColor);
   drawRect(ctx, o.x, o.y, 1, ROOM_H, wallShadow);
-  drawRect(ctx, o.x + ROOM_W - 4, o.y, 4, ROOM_H, wallColor);
+  drawRect(ctx, o.x + 1, o.y, 1, ROOM_H, wallHighlight);
+  // Right wall
+  drawRect(ctx, o.x + ROOM_W - wallThick, o.y, wallThick, ROOM_H, wallColor);
   drawRect(ctx, o.x + ROOM_W - 1, o.y, 1, ROOM_H, wallShadow);
+  drawRect(ctx, o.x + ROOM_W - 2, o.y, 1, ROOM_H, wallHighlight);
 
   // Bottom wall with door opening
-  const doorW = 34;
+  const doorW = 36;
   const doorX = o.x + ROOM_W / 2 - doorW / 2;
-  drawRect(ctx, o.x, o.y + ROOM_H - 4, doorX - o.x, 4, wallColor);
-  drawRect(ctx, doorX + doorW, o.y + ROOM_H - 4, o.x + ROOM_W - doorX - doorW, 4, wallColor);
-  // Door frame highlight
-  drawRect(ctx, doorX - 1, o.y + ROOM_H - 4, 1, 4, '#B8A898');
-  drawRect(ctx, doorX + doorW, o.y + ROOM_H - 4, 1, 4, '#B8A898');
+  drawRect(ctx, o.x, o.y + ROOM_H - wallThick, doorX - o.x, wallThick, wallColor);
+  drawRect(ctx, doorX + doorW, o.y + ROOM_H - wallThick, o.x + ROOM_W - doorX - doorW, wallThick, wallColor);
+  // Door frame
+  drawRect(ctx, doorX - 2, o.y + ROOM_H - wallThick, 2, wallThick, '#8D7B6B');
+  drawRect(ctx, doorX + doorW, o.y + ROOM_H - wallThick, 2, wallThick, '#8D7B6B');
 
-  // Baseboard — thin elegant
-  drawRect(ctx, o.x + 4, o.y + wallH, ROOM_W - 8, 2, '#C4B5A5');
+  // ── Baseboard — subtle trim ──
+  drawRect(ctx, o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, 2, '#B8A898');
+  drawRect(ctx, o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, 1, '#C8B8A8');
 
-  // ── Ceiling light (warm glow on floor) ──
-  ctx.fillStyle = 'rgba(255,245,220,0.04)';
+  // ── Ceiling light — warm overhead glow ──
+  ctx.fillStyle = 'rgba(255,248,230,0.05)';
   ctx.beginPath();
-  ctx.ellipse(o.x + ROOM_W / 2, o.y + ROOM_H / 2 + 20, 60, 40, 0, 0, Math.PI * 2);
+  ctx.ellipse(o.x + ROOM_W / 2, o.y + ROOM_H / 2 + 15, 55, 35, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Light fixture on ceiling
-  drawRect(ctx, o.x + ROOM_W / 2 - 8, o.y + 2, 16, 3, '#F5F0E8');
-  drawRect(ctx, o.x + ROOM_W / 2 - 5, o.y + 5, 10, 2, '#E8E0D0');
+  // Light fixture
+  drawRect(ctx, o.x + ROOM_W / 2 - 12, o.y + 1, 24, 3, '#F5F0E8');
+  drawRect(ctx, o.x + ROOM_W / 2 - 8, o.y + 4, 16, 2, '#E8E0D0');
 
-  // ── Nameplate: modern frosted glass style ──
+  // ── Nameplate — mounted on the back wall ──
   const plateTxt = `${emoji} ${name}`;
   ctx.font = 'bold 10px sans-serif';
   const tw = ctx.measureText(plateTxt).width;
-  const plateX = o.x + ROOM_W / 2 - tw / 2 - 6;
-  // Frosted glass plate
-  drawRect(ctx, plateX, o.y + 10, tw + 12, 16, 'rgba(255,255,255,0.15)');
-  drawRect(ctx, plateX + 1, o.y + 11, tw + 10, 14, 'rgba(255,255,255,0.08)');
+  const plateX = o.x + 18;
+  drawRect(ctx, plateX, o.y + 10, tw + 14, 18, 'rgba(0,0,0,0.2)');
+  drawRect(ctx, plateX + 1, o.y + 11, tw + 12, 16, 'rgba(255,255,255,0.12)');
   ctx.fillStyle = '#FFFFFF';
-  ctx.textAlign = 'center';
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(plateTxt, o.x + ROOM_W / 2, o.y + 18);
+  ctx.fillText(plateTxt, plateX + 7, o.y + 19);
 
-  // ── Small rug under desk area ──
-  const rugX = o.x + 70, rugY = o.y + 110;
-  const rugColor = darken(accent, 20);
-  drawRect(ctx, rugX, rugY, 80, 50, rugColor);
-  drawRect(ctx, rugX + 2, rugY + 2, 76, 46, lighten(rugColor, 10));
-  drawRect(ctx, rugX + 4, rugY + 4, 72, 42, rugColor);
+  // ── Area rug under desk ──
+  const rugX = o.x + 65, rugY = o.y + 100;
+  const rugColor = darken(accent, 15);
+  ctx.fillStyle = rugColor;
+  ctx.beginPath();
+  ctx.roundRect(rugX, rugY, 90, 60, 4);
+  ctx.fill();
+  ctx.fillStyle = lighten(rugColor, 12);
+  ctx.beginPath();
+  ctx.roundRect(rugX + 3, rugY + 3, 84, 54, 3);
+  ctx.fill();
 
   // Desk + chair
   const deskPos = getDeskPos(roomIndex);
@@ -451,7 +498,7 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   // Decorations
   const [dec1, dec2] = getRoomDecorations(label);
   drawDecoration(ctx, dec1, o.x + 15, o.y + 130, time);
-  drawDecoration(ctx, dec2, o.x + ROOM_W - 55, o.y + 45, time);
+  drawDecoration(ctx, dec2, o.x + ROOM_W - 55, o.y + 50, time);
 }
 
 // ─── Break Room ──────────────────────────────────────────────────────────────
@@ -462,22 +509,62 @@ function getBreakRoomSeat(agentIndex: number): { x: number; y: number } {
 
 function getBreakRoomWaypoints(fromRoom: number): { x: number; y: number }[] {
   const door = getDoorPos(fromRoom);
-  const corridorY = door.y + CORRIDOR / 2;
-  // Walk out of room, down the corridor to the break room entrance
-  return [
-    { x: door.x, y: corridorY },
-    { x: door.x, y: BREAK_ROOM_Y - 5 },
-  ];
+  const fromCol = fromRoom % COLS;
+  const fromRow = Math.floor(fromRoom / COLS);
+  const waypoints: { x: number; y: number }[] = [];
+
+  // Exit room into nearest horizontal corridor
+  const exitRow = fromRow < ROWS - 1 ? fromRow : fromRow - 1;
+  const exitY = hCorridorY(exitRow);
+  waypoints.push({ x: door.x, y: exitY });
+
+  // If not on the bottom row, walk down via vertical corridor
+  if (fromRow < ROWS - 1) {
+    const vcCol = fromCol < COLS - 1 ? fromCol : fromCol - 1;
+    const vcX = vCorridorX(vcCol);
+    waypoints.push({ x: vcX, y: exitY });
+    // Walk down to the bottom horizontal corridor (between row 2 and 3)
+    const bottomCorridorY = hCorridorY(ROWS - 2);
+    if (exitY !== bottomCorridorY) {
+      waypoints.push({ x: vcX, y: bottomCorridorY });
+    }
+    // Walk to the break room corridor
+    const breakCorridorY = GRID_H + CORRIDOR / 2;
+    waypoints.push({ x: vcX, y: breakCorridorY });
+  } else {
+    // Already on bottom row — just go to break room corridor
+    const breakCorridorY = GRID_H + CORRIDOR / 2;
+    waypoints.push({ x: door.x, y: breakCorridorY });
+  }
+
+  return waypoints;
 }
 
 function getReturnFromBreakWaypoints(toRoom: number, currentX: number, currentY: number): { x: number; y: number }[] {
   const door = getDoorPos(toRoom);
-  return [
-    { x: currentX, y: BREAK_ROOM_Y - 5 },
-    { x: door.x, y: BREAK_ROOM_Y - 5 },
-    { x: door.x, y: door.y + CORRIDOR / 2 },
-    { x: door.x, y: door.y },
-  ];
+  const toCol = toRoom % COLS;
+  const toRow = Math.floor(toRoom / COLS);
+  const waypoints: { x: number; y: number }[] = [];
+
+  // Walk to break room corridor center
+  const breakCorridorY = GRID_H + CORRIDOR / 2;
+  waypoints.push({ x: currentX, y: breakCorridorY });
+
+  // Use a vertical corridor to go up
+  const vcCol = toCol < COLS - 1 ? toCol : toCol - 1;
+  const vcX = vCorridorX(vcCol);
+  waypoints.push({ x: vcX, y: breakCorridorY });
+
+  // Walk up to the corridor near the target room
+  const entryRow = toRow < ROWS - 1 ? toRow : toRow - 1;
+  const entryY = hCorridorY(entryRow);
+  waypoints.push({ x: vcX, y: entryY });
+
+  // Walk to door
+  waypoints.push({ x: door.x, y: entryY });
+  waypoints.push({ x: door.x, y: door.y });
+
+  return waypoints;
 }
 
 function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
@@ -629,28 +716,40 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   ctx.fillText('RELAX', W / 2, posterY + 12);
 }
 
-// Draw corridors — modern polished concrete with subtle pattern
+// Draw corridor tiles — polished floor with subtle pattern and lighting
 function drawCorridorTiles(ctx: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number) {
-  const tileA = '#B8B0A8';
-  const tileB = '#ADA5A0';
+  const tileA = '#C4BDB5';
+  const tileB = '#B8B0A8';
   const tileSize = 20;
-  // Base fill
+  // Base
   ctx.fillStyle = tileA;
   ctx.fillRect(rx, ry, rw, rh);
-  // Checkerboard
+  // Checkerboard tiles
   for (let x = rx; x < rx + rw; x += tileSize) {
     for (let y = ry; y < ry + rh; y += tileSize) {
       if ((Math.floor((x - rx) / tileSize) + Math.floor((y - ry) / tileSize)) % 2 === 0) {
         drawRect(ctx, x, y, Math.min(tileSize, rx + rw - x), Math.min(tileSize, ry + rh - y), tileB);
       }
+      // Tile grout
+      drawRect(ctx, x, y, Math.min(tileSize, rx + rw - x), 1, 'rgba(0,0,0,0.04)');
+      drawRect(ctx, x, y, 1, Math.min(tileSize, ry + rh - y), 'rgba(0,0,0,0.04)');
     }
   }
-  // Subtle center line
-  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  // Center guide line (like real office corridors)
+  ctx.fillStyle = 'rgba(139,92,246,0.08)';
   if (rw > rh) {
     ctx.fillRect(rx, ry + rh / 2 - 1, rw, 2);
   } else {
     ctx.fillRect(rx + rw / 2 - 1, ry, 2, rh);
+  }
+  // Edge shadow for depth
+  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  if (rw > rh) {
+    ctx.fillRect(rx, ry, rw, 2);
+    ctx.fillRect(rx, ry + rh - 2, rw, 2);
+  } else {
+    ctx.fillRect(rx, ry, 2, rh);
+    ctx.fillRect(rx + rw - 2, ry, 2, rh);
   }
 }
 
@@ -1121,15 +1220,18 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         avatarImg: null, avatarLoaded: false, avatarUrl: sv.avatarUrl,
       };
 
-      // Build path: entry point → corridor → agent's room
-      const roomOrigin = getRoomOrigin(targetRoom);
-      const doorX = roomOrigin.x + ROOM_W / 2;
-      const doorY = roomOrigin.y + ROOM_H;
+      // Build path: enter via a horizontal corridor, then walk to agent's room
+      const targetRow = Math.floor(targetRoom / COLS);
+      const targetCol = targetRoom % COLS;
+      const door = getDoorPos(targetRoom);
+      // Enter on the corridor closest to the target room
+      const entryCorridorRow = targetRow < ROWS - 1 ? targetRow : targetRow - 1;
+      const corridorCenterY = hCorridorY(entryCorridorRow);
       newVisitor.waypoints = [
-        { x: 0, y: entryY },                        // Enter from left
-        { x: doorX, y: entryY },                     // Walk horizontally
-        { x: doorX, y: doorY },                      // Walk to room door
-        { x: chairPos.x + 25, y: chairPos.y + 10 },  // Stand near agent
+        { x: 0, y: corridorCenterY },                  // Enter from left edge on corridor
+        { x: door.x, y: corridorCenterY },             // Walk along corridor to door
+        { x: door.x, y: door.y },                      // Enter through door
+        { x: chairPos.x + 25, y: chairPos.y + 10 },   // Stand near agent
       ];
       newVisitor.waypointIndex = 0;
       newVisitor.targetX = newVisitor.waypoints[0].x;
