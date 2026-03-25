@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile, readdir, stat } from 'fs/promises';
 import path from 'path';
 import { AGENTS } from '@/lib/agents';
-
-const HOME = process.env.HOME || '/Users/bellette';
-const AGENTS_DIR = path.join(HOME, '.openclaw/agents');
+import { HOME, AGENTS_DIR } from '@/lib/paths';
 
 interface ActivityEvent {
   id: string;

@@ -19,6 +19,10 @@ export const AGENTS: AgentConfig[] = [
   { label: 'ada', name: 'Ada', emoji: '🧠' },
   { label: 'ivy', name: 'Ivy', emoji: '🌿' },
   { label: 'tess', name: 'Tess', emoji: '🧪' },
+  { label: 'cole', name: 'Cole', emoji: '🎯' },
+  { label: 'dash', name: 'Dash', emoji: '⚡' },
+  { label: 'miles', name: 'Miles', emoji: '🗺️' },
+  { label: 'sloane', name: 'Sloane', emoji: '💎' },
 ];
 
 export interface AgentState {

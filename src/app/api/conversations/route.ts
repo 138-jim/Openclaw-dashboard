@@ -3,8 +3,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { AGENTS } from '@/lib/agents';
 import { generateConversations } from '@/lib/conversations';
-
-const HOME = process.env.HOME || '/Users/bellette';
+import { HOME } from '@/lib/paths';
 
 export async function GET() {
   const agents = await Promise.all(
