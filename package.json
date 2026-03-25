@@ -6,9 +6,11 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "monitor": "npx tsx src/monitor/agent-monitor.ts"
+    "monitor": "npx tsx src/monitor/agent-monitor.ts",
+    "recovery": "npx tsx src/monitor/recovery-agent.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.83",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "@tailwindcss/postcss": "^4.2.2",
