@@ -1634,9 +1634,8 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         const dy = v.targetY - v.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist > 1) {
+        if (dist > 0.2) {
           v.isWalking = true;
-
           let moveX = (dx / dist) * VISITOR_SPEED;
           let moveY = (dy / dist) * VISITOR_SPEED;
 
