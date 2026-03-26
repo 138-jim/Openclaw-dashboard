@@ -1284,15 +1284,16 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         continue;
       }
 
-      // New visitor — spawn at left edge of canvas, walk to agent's room
+      // New visitor — spawn on the nearest corridor, walk to agent via A*
       const h = hashStr(sv.id);
-      const entryY = 100 + (h % (H - 200));
-      const chairPos = getChairPos(targetRoom);
+      const targetRow = Math.floor(targetRoom / COLS);
+      const entryCorridorRow = targetRow < ROWS - 1 ? targetRow : targetRow - 1;
+      const corridorCenterY = hCorridorY(entryCorridorRow);
 
       const newVisitor: VisitorAnim = {
         id: sv.id, name: sv.name, surface: sv.surface || 'slack',
-        x: -20, y: entryY,
-        targetX: -20, targetY: entryY,
+        x: -20, y: corridorCenterY,
+        targetX: -20, targetY: corridorCenterY,
         shirtColor: VISITOR_SHIRT_COLORS[h % VISITOR_SHIRT_COLORS.length],
         skinColor: VISITOR_SKIN_COLORS[(h >> 3) % VISITOR_SKIN_COLORS.length],
         walkFrame: 0, walkTimer: 0, isWalking: false,
@@ -1305,16 +1306,10 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         chatTimer: 0,
         avatarImg: null, avatarLoaded: false, avatarUrl: sv.avatarUrl,
       };
-
-      const targetRow = Math.floor(targetRoom / COLS);
-      const door = getDoorPos(targetRoom);
-      const entryCorridorRow = targetRow < ROWS - 1 ? targetRow : targetRow - 1;
-      const corridorCenterY = hCorridorY(entryCorridorRow);
+      // Simple entry: walk onto the corridor from the left edge
+      // walking_to_agent will use A* to reach the actual agent
       newVisitor.waypoints = [
-        { x: 0, y: corridorCenterY },
-        { x: door.x, y: corridorCenterY },
-        { x: door.x, y: door.y },
-        { x: chairPos.x + 25, y: chairPos.y + 10 },
+        { x: 20, y: corridorCenterY },
       ];
       newVisitor.waypointIndex = 0;
       newVisitor.targetX = newVisitor.waypoints[0].x;
