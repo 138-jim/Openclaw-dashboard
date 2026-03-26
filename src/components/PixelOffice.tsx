@@ -6,14 +6,14 @@ import { Conversation } from '@/lib/conversations';
 import { SlackVisitor } from '@/lib/visitors';
 
 // ─── Layout Constants ────────────────────────────────────────────────────────
-const ROOM_W = 220, ROOM_H = 200;
-const CORRIDOR = 40;
+const ROOM_W = 160, ROOM_H = 140;
+const CORRIDOR = 30;
 const COLS = 5, ROWS = 4;
-const GRID_W = COLS * ROOM_W + (COLS - 1) * CORRIDOR;  // 1000
-const GRID_H = ROWS * ROOM_H + (ROWS - 1) * CORRIDOR;  // 920
+const GRID_W = COLS * ROOM_W + (COLS - 1) * CORRIDOR;
+const GRID_H = ROWS * ROOM_H + (ROWS - 1) * CORRIDOR;
 
 // Break room on the right side of the grid
-const BREAK_ROOM_W = 260;
+const BREAK_ROOM_W = 190;
 const BREAK_ROOM_X = GRID_W + CORRIDOR; // corridor gap then break room
 const W = BREAK_ROOM_X + BREAK_ROOM_W;
 const H = GRID_H;
@@ -21,28 +21,21 @@ const H = GRID_H;
 const ACTIVE_STATES = new Set(['writing', 'researching', 'executing', 'syncing']);
 
 // Break room seating positions (agents lounge here when idle)
-const BREAK_ROOM_SEATS = [
-  { x: BREAK_ROOM_X + 50, y: 80 },
-  { x: BREAK_ROOM_X + 130, y: 100 },
-  { x: BREAK_ROOM_X + 200, y: 75 },
-  { x: BREAK_ROOM_X + 60, y: 180 },
-  { x: BREAK_ROOM_X + 140, y: 200 },
-  { x: BREAK_ROOM_X + 210, y: 175 },
-  { x: BREAK_ROOM_X + 50, y: 300 },
-  { x: BREAK_ROOM_X + 130, y: 320 },
-  { x: BREAK_ROOM_X + 200, y: 295 },
-  { x: BREAK_ROOM_X + 60, y: 420 },
-  { x: BREAK_ROOM_X + 140, y: 440 },
-  { x: BREAK_ROOM_X + 210, y: 415 },
-  { x: BREAK_ROOM_X + 50, y: 540 },
-  { x: BREAK_ROOM_X + 130, y: 560 },
-  { x: BREAK_ROOM_X + 200, y: 535 },
-  { x: BREAK_ROOM_X + 130, y: 680 },
-  { x: BREAK_ROOM_X + 80, y: 750 },
-  { x: BREAK_ROOM_X + 170, y: 770 },
-  { x: BREAK_ROOM_X + 60, y: 830 },
-  { x: BREAK_ROOM_X + 190, y: 850 },
-];
+// Generate break room seats dynamically to fit the grid
+const BREAK_ROOM_SEATS = (() => {
+  const seats: { x: number; y: number }[] = [];
+  const cols = 3, rows = 7;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (seats.length >= 20) break;
+      seats.push({
+        x: BREAK_ROOM_X + 35 + c * 60,
+        y: 60 + r * (GRID_H / rows),
+      });
+    }
+  }
+  return seats;
+})();
 
 // Agent color palettes derived from name hash
 const SHIRT_COLORS = [
@@ -75,17 +68,17 @@ function getRoomOrigin(index: number): { x: number; y: number } {
 
 function getDeskPos(roomIndex: number): { x: number; y: number } {
   const o = getRoomOrigin(roomIndex);
-  return { x: o.x + 90, y: o.y + 80 };
+  return { x: o.x + 65, y: o.y + 55 };
 }
 
 function getChairPos(roomIndex: number): { x: number; y: number } {
   const o = getRoomOrigin(roomIndex);
-  return { x: o.x + 95, y: o.y + 105 };
+  return { x: o.x + 69, y: o.y + 73 };
 }
 
 function getMonitorPos(roomIndex: number): { x: number; y: number } {
   const o = getRoomOrigin(roomIndex);
-  return { x: o.x + 104, y: o.y + 71 };
+  return { x: o.x + 76, y: o.y + 48 };
 }
 
 // Door position — 0.5 units INTO the corridor so agents clear the doorframe
@@ -165,17 +158,6 @@ function buildNavGraph() {
       const projId = ensure(doorAbove.x, cy);
       nodesOnCorridor.push(projId);
       connect(nid(doorAbove.x, doorAbove.y), projId);
-
-      // Room below — connect its door to this corridor too
-      const roomBelow = (row + 1) * COLS + col;
-      const doorBelow = getDoorPos(roomBelow);
-      const projBelowId = ensure(doorBelow.x, cy);
-      if (!nodesOnCorridor.includes(projBelowId)) nodesOnCorridor.push(projBelowId);
-      // Connect via intermediate node at top of room below
-      const topOfBelow = Math.floor(roomBelow / COLS) * (ROOM_H + CORRIDOR);
-      const topId = ensure(doorBelow.x, topOfBelow);
-      connect(projBelowId, topId);
-      connect(topId, nid(doorBelow.x, doorBelow.y));
     }
 
     // V-corridor intersections
@@ -316,7 +298,6 @@ function aStar(startX: number, startY: number, endX: number, endY: number): { x:
 // ─── Safe pathfinding wrapper — never walks through walls ────────────────────
 function pathTo(fromX: number, fromY: number, toX: number, toY: number): { x: number; y: number }[] {
   const path = aStar(fromX, fromY, toX, toY);
-  const dest = { x: toX, y: toY };
   if (path.length === 0) {
     // No A* path — find nearest graph node as intermediate
     let bestNode: { x: number; y: number } | null = null;
@@ -325,11 +306,10 @@ function pathTo(fromX: number, fromY: number, toX: number, toY: number): { x: nu
       const d = Math.hypot(node.x - toX, node.y - toY);
       if (d < bestDist) { bestDist = d; bestNode = { x: node.x, y: node.y }; }
     });
-    if (bestNode) return [bestNode, dest];
-    return [dest];
+    if (bestNode) return [bestNode, { x: toX, y: toY }];
+    return [{ x: toX, y: toY }];
   }
-  // Always append exact destination
-  path.push(dest);
+  // A* already includes the destination — don't duplicate it
   return path;
 }
 
@@ -672,8 +652,8 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   roundRect(ctx, o.x + 4, o.y + 4, ROOM_W - 8, 4, 2, accent);
 
   // Window on back wall — simple light blue rounded rect
-  const winW = 44, winH = 20;
-  const winX = o.x + ROOM_W - 65, winY = o.y + 14;
+  const winW = 34, winH = 16;
+  const winX = o.x + ROOM_W - 50, winY = o.y + 12;
   setShadow(ctx, 2, 0, 1, 'rgba(0,0,0,0.06)');
   roundRect(ctx, winX, winY, winW, winH, 3, '#B3E5FC');
   clearShadow(ctx);
@@ -709,7 +689,7 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   ctx.stroke();
 
   // Bottom wall with door gap
-  const doorW = 36;
+  const doorW = 28;
   const doorX = o.x + ROOM_W / 2 - doorW / 2;
   ctx.beginPath();
   ctx.moveTo(o.x, o.y + ROOM_H - 0.5);
@@ -741,8 +721,8 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
 
   // Decorations
   const [dec1, dec2] = getRoomDecorations(label);
-  drawDecoration(ctx, dec1, o.x + 15, o.y + 130, time);
-  drawDecoration(ctx, dec2, o.x + ROOM_W - 55, o.y + 50, time);
+  drawDecoration(ctx, dec1, o.x + 12, o.y + 90, time);
+  drawDecoration(ctx, dec2, o.x + ROOM_W - 45, o.y + 38, time);
 }
 
 // ─── Break Room (flat vector) ────────────────────────────────────────────────
@@ -800,10 +780,10 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   ctx.fillText('Break Room', bx + 18, 22);
 
   // Couch (top area)
-  drawCouch(ctx, bx + 20, 60);
+  drawCouch(ctx, bx + 15, 45);
 
   // Coffee table — small brown rounded rect
-  const ctX = bx + 90, ctY = 130;
+  const ctX = bx + 60, ctY = 95;
   setShadow(ctx, 3, 0, 1);
   roundRect(ctx, ctX, ctY, 46, 6, 3, '#8D6E63');
   clearShadow(ctx);
@@ -813,27 +793,27 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   roundRect(ctx, ctX + 30, ctY - 3, 5, 4, 1.5, '#ECEFF1');
 
   // Accent rug (middle area)
-  const rugX = bx + 30, rugY = 250;
-  roundRect(ctx, rugX, rugY, 200, 100, 8, '#9C27B0');
-  roundRect(ctx, rugX + 4, rugY + 4, 192, 92, 6, '#AB47BC');
+  const rugX = bx + 20, rugY = 180;
+  roundRect(ctx, rugX, rugY, 150, 70, 8, '#9C27B0');
+  roundRect(ctx, rugX + 4, rugY + 4, 142, 62, 6, '#AB47BC');
   // Simple dot pattern
   ctx.fillStyle = '#CE93D8';
-  for (let i = 0; i < 5; i++) {
-    const dx = rugX + 25 + i * 38;
-    const dy = rugY + 48;
+  for (let i = 0; i < 4; i++) {
+    const dx = rugX + 20 + i * 32;
+    const dy = rugY + 34;
     ctx.beginPath();
     ctx.arc(dx, dy, 4, 0, Math.PI * 2);
     ctx.fill();
   }
 
   // Couch (lower area)
-  drawCouch(ctx, bx + 20, 380);
+  drawCouch(ctx, bx + 15, 280);
 
   // Coffee machine
-  drawCoffeeMachine(ctx, bx + 30, 500, time);
+  drawCoffeeMachine(ctx, bx + 20, 360, time);
 
   // Vending machine
-  const vmX = bx + 80, vmY = 500;
+  const vmX = bx + 60, vmY = 360;
   setShadow(ctx, 4, 0, 2);
   roundRect(ctx, vmX, vmY, 30, 40, 4, '#1976D2');
   clearShadow(ctx);
@@ -847,13 +827,13 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   roundRect(ctx, vmX + 2, vmY + 26, 26, 12, 2, '#0D47A1');
 
   // Plants
-  drawPlant(ctx, bx + 15, 160);
-  drawPlant(ctx, bx + BREAK_ROOM_W - 25, 160);
-  drawPlant(ctx, bx + 15, 460);
-  drawPlant(ctx, bx + BREAK_ROOM_W - 25, 600);
+  drawPlant(ctx, bx + 10, 120);
+  drawPlant(ctx, bx + BREAK_ROOM_W - 20, 120);
+  drawPlant(ctx, bx + 10, 330);
+  drawPlant(ctx, bx + BREAK_ROOM_W - 20, 430);
 
   // Potted tree
-  const ptX = bx + BREAK_ROOM_W - 50, ptY = 50;
+  const ptX = bx + BREAK_ROOM_W - 40, ptY = 40;
   roundRect(ctx, ptX, ptY + 16, 12, 10, 3, '#D84315');
   roundRect(ctx, ptX - 1, ptY + 15, 14, 2, 1, '#BF360C');
   roundRect(ctx, ptX + 3, ptY + 8, 6, 8, 2, '#4CAF50');
@@ -864,7 +844,7 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   ctx.beginPath(); ctx.arc(ptX + 10, ptY + 5, 4, 0, Math.PI * 2); ctx.fill();
 
   // Wall art — simple framed rectangles
-  const posterX = bx + 100, posterY = 10;
+  const posterX = bx + 80, posterY = 8;
   setShadow(ctx, 2, 0, 1);
   roundRect(ctx, posterX, posterY, 30, 22, 3, '#37474F');
   clearShadow(ctx);
@@ -1140,8 +1120,12 @@ function drawThoughtBubble(ctx: CanvasRenderingContext2D, monitorX: number, moni
   const bh = lines.length * lineH + padding * 2;
 
   const bobY = Math.sin(time * 0.002) * 2;
-  const bx = monitorX - bw / 2;
-  const by = monitorY - bh - 20 + bobY;
+  // Clamp so bubble stays within canvas bounds
+  let bx = monitorX - bw / 2;
+  let by = monitorY - bh - 20 + bobY;
+  if (bx < 4) bx = 4;
+  if (bx + bw > W - 4) bx = W - bw - 4;
+  if (by < 4) by = 4;
 
   const alpha = Math.min(1, (time % 10000) / 500);
   ctx.globalAlpha = alpha;
@@ -1249,6 +1233,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
   useEffect(() => {
     animRef.current.conversations = conversations;
   }, [conversations]);
+
 
   // Sync visitor data to animation state
   useEffect(() => {
@@ -1485,7 +1470,8 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         visitor.chatTarget = stayer.roomIndex;
         visitor.waypoints = getCorridorWaypoints(visitor.roomIndex, stayer.roomIndex);
         const stayerChair = getChairPos(stayer.roomIndex);
-        visitor.waypoints.push({ x: stayerChair.x + 20, y: stayerChair.y + 10 });
+        // Stand to the LEFT of the agent (visitors from Slack go RIGHT)
+        visitor.waypoints.push({ x: stayerChair.x - 20, y: stayerChair.y });
         visitor.waypointIndex = 0;
         visitor.targetX = visitor.waypoints[0].x;
         visitor.targetY = visitor.waypoints[0].y;
@@ -1523,86 +1509,70 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
       }
 
       // ─── Update agents ───
-      const WALK_SPEED = 1.6;
-      const CORNER_RADIUS = 12;
+      const WALK_SPEED = 3.2;
 
       for (const a of anim.agents) {
-        const dx = a.targetX - a.x;
-        const dy = a.targetY - a.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        let remaining = WALK_SPEED;
+        const isTransit = a.chatState === 'walking_to_chat' || a.chatState === 'walking_home'
+          || a.chatState === 'walking_to_break' || a.chatState === 'walking_from_break';
 
-        if (dist > 1) {
-          a.isWalking = true;
+        // Move through waypoints, carrying over leftover distance
+        while (remaining > 0.1) {
+          const dx = a.targetX - a.x;
+          const dy = a.targetY - a.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
 
-          const isTransit = a.chatState === 'walking_to_chat' || a.chatState === 'walking_home'
-            || a.chatState === 'walking_to_break' || a.chatState === 'walking_from_break';
-          let moveX = (dx / dist) * WALK_SPEED;
-          let moveY = (dy / dist) * WALK_SPEED;
+          if (dist <= remaining) {
+            // Arrive at waypoint, use leftover for next segment
+            a.x = a.targetX;
+            a.y = a.targetY;
+            remaining -= dist;
 
-          if (isTransit && dist < CORNER_RADIUS && a.waypointIndex < a.waypoints.length - 1) {
-            const nextWp = a.waypoints[a.waypointIndex + 1];
-            if (nextWp) {
-              const ndx = nextWp.x - a.targetX;
-              const ndy = nextWp.y - a.targetY;
-              const ndist = Math.sqrt(ndx * ndx + ndy * ndy);
-              if (ndist > 0) {
-                const blend = 1 - (dist / CORNER_RADIUS);
-                const nextDirX = ndx / ndist;
-                const nextDirY = ndy / ndist;
-                const curDirX = dx / dist;
-                const curDirY = dy / dist;
-                const blendX = curDirX * (1 - blend) + nextDirX * blend;
-                const blendY = curDirY * (1 - blend) + nextDirY * blend;
-                const blendDist = Math.sqrt(blendX * blendX + blendY * blendY);
-                if (blendDist > 0) {
-                  moveX = (blendX / blendDist) * WALK_SPEED;
-                  moveY = (blendY / blendDist) * WALK_SPEED;
+            // Advance to next waypoint
+            if (isTransit && a.waypoints.length > 0) {
+              a.waypointIndex++;
+              if (a.waypointIndex < a.waypoints.length) {
+                a.targetX = a.waypoints[a.waypointIndex].x;
+                a.targetY = a.waypoints[a.waypointIndex].y;
+                continue; // use remaining distance toward next waypoint
+              } else {
+                if (a.chatState === 'walking_to_chat') {
+                  a.chatState = 'chatting';
+                  a.chatTimer = 0;
+                } else if (a.chatState === 'walking_to_break') {
+                  a.chatState = 'in_break_room';
+                } else if (a.chatState === 'walking_from_break') {
+                  a.chatState = 'at_desk';
+                  const homeChair = getChairPos(a.roomIndex);
+                  a.targetX = homeChair.x;
+                  a.targetY = homeChair.y;
+                } else {
+                  a.chatState = 'at_desk';
+                  a.conversationId = null;
+                  const homeChair = getChairPos(a.roomIndex);
+                  a.targetX = homeChair.x;
+                  a.targetY = homeChair.y;
                 }
+                a.waypoints = [];
+                a.waypointIndex = 0;
               }
             }
+            a.isWalking = false;
+            break;
+          } else {
+            // Move toward target
+            a.x += (dx / dist) * remaining;
+            a.y += (dy / dist) * remaining;
+            a.isWalking = true;
+            remaining = 0;
           }
+        }
 
-          a.x += moveX;
-          a.y += moveY;
-
+        if (a.isWalking) {
           a.walkTimer += dt;
           if (a.walkTimer > 120) {
             a.walkFrame = (a.walkFrame + 1) % 4;
             a.walkTimer = 0;
-          }
-        } else {
-          a.isWalking = false;
-          a.x = a.targetX;
-          a.y = a.targetY;
-
-          const isTransit = a.chatState === 'walking_to_chat' || a.chatState === 'walking_home'
-            || a.chatState === 'walking_to_break' || a.chatState === 'walking_from_break';
-          if (isTransit && a.waypoints.length > 0) {
-            a.waypointIndex++;
-            if (a.waypointIndex < a.waypoints.length) {
-              a.targetX = a.waypoints[a.waypointIndex].x;
-              a.targetY = a.waypoints[a.waypointIndex].y;
-            } else {
-              if (a.chatState === 'walking_to_chat') {
-                a.chatState = 'chatting';
-                a.chatTimer = 0;
-              } else if (a.chatState === 'walking_to_break') {
-                a.chatState = 'in_break_room';
-              } else if (a.chatState === 'walking_from_break') {
-                a.chatState = 'at_desk';
-                const homeChair = getChairPos(a.roomIndex);
-                a.targetX = homeChair.x;
-                a.targetY = homeChair.y;
-              } else {
-                a.chatState = 'at_desk';
-                a.conversationId = null;
-                const homeChair = getChairPos(a.roomIndex);
-                a.targetX = homeChair.x;
-                a.targetY = homeChair.y;
-              }
-              a.waypoints = [];
-              a.waypointIndex = 0;
-            }
           }
         }
 
@@ -1628,70 +1598,58 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
       }
 
       // ─── Update visitors ───
-      const VISITOR_SPEED = 1.4;
+      const VISITOR_SPEED = 2.8;
       for (const v of anim.visitors) {
-        const dx = v.targetX - v.x;
-        const dy = v.targetY - v.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        let vRemaining = VISITOR_SPEED;
 
-        if (dist > 0.2) {
-          v.isWalking = true;
-          let moveX = (dx / dist) * VISITOR_SPEED;
-          let moveY = (dy / dist) * VISITOR_SPEED;
+        while (vRemaining > 0.1) {
+          const dx = v.targetX - v.x;
+          const dy = v.targetY - v.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
 
-          if (dist < CORNER_RADIUS && v.waypointIndex < v.waypoints.length - 1) {
-            const nextWp = v.waypoints[v.waypointIndex + 1];
-            if (nextWp) {
-              const ndx = nextWp.x - v.targetX;
-              const ndy = nextWp.y - v.targetY;
-              const ndist = Math.sqrt(ndx * ndx + ndy * ndy);
-              if (ndist > 0) {
-                const blend = 1 - (dist / CORNER_RADIUS);
-                const bx = (dx / dist) * (1 - blend) + (ndx / ndist) * blend;
-                const by = (dy / dist) * (1 - blend) + (ndy / ndist) * blend;
-                const bd = Math.sqrt(bx * bx + by * by);
-                if (bd > 0) { moveX = (bx / bd) * VISITOR_SPEED; moveY = (by / bd) * VISITOR_SPEED; }
+          if (dist <= vRemaining) {
+            v.x = v.targetX;
+            v.y = v.targetY;
+            vRemaining -= dist;
+
+            if (v.waypoints.length > 0) {
+              v.waypointIndex++;
+              if (v.waypointIndex < v.waypoints.length) {
+                v.targetX = v.waypoints[v.waypointIndex].x;
+                v.targetY = v.waypoints[v.waypointIndex].y;
+                continue;
+              } else {
+                v.waypoints = [];
+                v.waypointIndex = 0;
+                if (v.chatState === 'entering') {
+                  v.chatState = 'walking_to_agent';
+                  const chair = getChairPos(v.targetRoomIndex);
+                  // Stand to the RIGHT of agent, stagger vertically per visitor
+                  const vIdx = anim.visitors.indexOf(v);
+                  const staggerY = vIdx * 18;
+                  setWaypoints(v, pathTo(v.x, v.y, chair.x + 22, chair.y + staggerY));
+                  if (v.waypoints.length > 0) continue;
+                } else if (v.chatState === 'walking_to_agent') {
+                  v.chatState = 'chatting';
+                  v.chatTimer = 0;
+                }
               }
             }
+            v.isWalking = false;
+            break;
+          } else {
+            v.x += (dx / dist) * vRemaining;
+            v.y += (dy / dist) * vRemaining;
+            v.isWalking = true;
+            vRemaining = 0;
           }
+        }
 
-          v.x += moveX;
-          v.y += moveY;
+        if (v.isWalking) {
           v.walkTimer += dt;
           if (v.walkTimer > 130) {
             v.walkFrame = (v.walkFrame + 1) % 4;
             v.walkTimer = 0;
-          }
-        } else {
-          v.isWalking = false;
-          v.x = v.targetX;
-          v.y = v.targetY;
-
-          if (v.waypoints.length > 0) {
-            v.waypointIndex++;
-            if (v.waypointIndex < v.waypoints.length) {
-              v.targetX = v.waypoints[v.waypointIndex].x;
-              v.targetY = v.waypoints[v.waypointIndex].y;
-            } else {
-              v.waypoints = [];
-              v.waypointIndex = 0;
-              if (v.chatState === 'entering') {
-                // Arrived at spawn — now walk to the target agent
-                v.chatState = 'walking_to_agent';
-                // Find the agent and pathfind to them
-                const targetAgent = anim.agents.find(a => a.label === v.targetAgentLabel);
-                if (targetAgent) {
-                  const vi = anim.visitors.indexOf(v);
-                  const angle = (vi * 1.5 + 0.5) % (Math.PI * 2);
-                  const offX = Math.cos(angle) * 30;
-                  const offY = Math.sin(angle) * 30;
-                  setWaypoints(v, pathTo(v.x, v.y, targetAgent.x + offX, targetAgent.y + offY));
-                }
-              } else if (v.chatState === 'walking_to_agent') {
-                v.chatState = 'chatting';
-                v.chatTimer = 0;
-              }
-            }
           }
         }
 

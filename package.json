@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev -p 3001 -H 0.0.0.0",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "next start -p 3001 -H 0.0.0.0",
     "monitor": "npx tsx src/monitor/agent-monitor.ts",
-    "recovery": "npx tsx src/monitor/recovery-agent.ts"
+    "recovery": "npx tsx src/monitor/recovery-agent.ts",
+    "go": "npm run build && concurrently -n dash,monitor -c blue,green \"npm start\" \"npm run monitor\"",
+    "stop": "pkill -f 'next start' ; pkill -f 'agent-monitor' ; pkill -f 'recovery-agent' ; echo 'All stopped'"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.83",
@@ -18,6 +20,7 @@
     "@types/three": "^0.183.1",
     "autoprefixer": "^10.4.27",
     "chokidar": "^5.0.0",
+    "concurrently": "^9.2.1",
     "date-fns": "^4.1.0",
     "next": "^14.2.35",
     "postcss": "^8.5.8",

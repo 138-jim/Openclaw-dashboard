@@ -33,7 +33,7 @@ try {
 const HOME = process.env.HOME || '/Users/bellette';
 const AGENTS_DIR = path.join(HOME, '.openclaw/agents');
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
-const MINIMAX_BASE_URL = process.env.MINIMAX_BASE_URL || 'https://api.minimax.chat/v1';
+const MINIMAX_BASE_URL = process.env.MINIMAX_BASE_URL || 'https://api.minimaxi.chat/v1';
 const POLL_INTERVAL = 500; // 0.5 seconds
 const TAIL_LINES = 50; // Read last N lines of session file
 const ACTIVE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes — consider agent active if session modified within this
@@ -63,16 +63,19 @@ async function classifyWithMinimax(agentLabel: string, recentMessages: string): 
         'Authorization': `Bearer ${MINIMAX_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'MiniMax-M1-80k',
+        model: 'MiniMax-Text-01',
         messages: [
           {
             role: 'system',
             content: `Classify what an AI agent is doing. Respond in exactly this format (two lines):
 
 STATE: <one of: idle, writing, researching, executing, syncing>
-DETAIL: <a full paragraph describing what the agent is working on>
+DETAIL: <1-2 short sentences in simple plain English explaining what the agent is doing, suitable for non-technical users>
 
-The DETAIL line must be a complete paragraph of 2-3 sentences describing the task with full context.
+Write the DETAIL as if explaining to someone who doesn't know programming. Avoid code terms, file paths, and technical jargon. Focus on the goal, not the method. For example:
+- Instead of "Running npm build on the Next.js project" → "Building the website"
+- Instead of "Querying the Xero API for invoice data" → "Pulling the latest invoices from Xero"
+- Instead of "Debugging a TypeError in auth middleware" → "Fixing a login issue"
 
 State meanings: idle=done/finished, writing=composing text, researching=gathering info, executing=running tasks, syncing=coordinating.
 IMPORTANT: Never use "error" as a state. Even if the agent is discussing errors, crashes, or bugs — classify based on what the agent is DOING (e.g. "executing" if debugging, "writing" if composing a fix).
@@ -137,27 +140,27 @@ function classifyHeuristic(text: string): { state: string; detail: string } {
     : '';
 
   if (lower.includes('error') || lower.includes('failed') || lower.includes('exception') || lower.includes('traceback')) {
-    return { state: 'error', detail: snippet || 'Error detected in recent activity' };
+    return { state: 'executing', detail: 'Investigating and fixing an issue' };
   }
   if (lower.includes('writing') || lower.includes('draft') || lower.includes('compose') || lower.includes('editing') || lower.includes('message')) {
-    return { state: 'writing', detail: snippet || 'Writing content' };
+    return { state: 'writing', detail: 'Writing a message or document' };
   }
   if (lower.includes('search') || lower.includes('research') || lower.includes('looking') || lower.includes('reading') || lower.includes('finding')) {
-    return { state: 'researching', detail: snippet || 'Researching' };
+    return { state: 'researching', detail: 'Looking something up' };
   }
   if (lower.includes('sync') || lower.includes('coordinate') || lower.includes('handoff') || lower.includes('passing to') || lower.includes('slack')) {
-    return { state: 'syncing', detail: snippet || 'Syncing with other agents' };
+    return { state: 'syncing', detail: 'Coordinating with the team' };
   }
   if (lower.includes('running') || lower.includes('executing') || lower.includes('deploy') || lower.includes('building') || lower.includes('command') || lower.includes('code')) {
-    return { state: 'executing', detail: snippet || 'Running tasks' };
+    return { state: 'executing', detail: 'Running a task' };
   }
 
-  // If there's content at all, assume executing with a snippet
+  // If there's content at all, assume executing
   if (text.trim().length > 50) {
-    return { state: 'executing', detail: snippet || 'Working on task' };
+    return { state: 'executing', detail: 'Working on something' };
   }
 
-  return { state: 'idle', detail: 'Standing by' };
+  return { state: 'idle', detail: 'Taking a break' };
 }
 
 // ─── Read latest messages from session files ─────────────────────────────────
@@ -209,11 +212,16 @@ async function getRecentMessages(agentLabel: string): Promise<{ text: string; mt
           if (role === 'toolResult' || role === 'tool') continue;
           const content = msg.content;
 
-          // Strip control tags from text
+          // Strip control tags, cron metadata, and technical noise
           const cleanText = (t: string) => t
             .replace(/<\/?final>/g, '')
             .replace(/\[\[[\w_]+\]\]/g, '')
             .replace(/<\/?[\w-]+>/g, '')
+            .replace(/\[cron:[a-f0-9-]+\s+([^\]]+?)(?:\s*\([^)]*\))?\]\s*/gi, '$1: ')
+            .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, '')
+            .replace(/"?message_id"?\s*:\s*"?[\d."]+"?,?\s*/g, '')
+            .replace(/"?reply_to_id"?\s*:\s*"?[\d."]+"?,?\s*/g, '')
+            .replace(/Conversation info \(untrusted metadata\):\s*/g, '')
             .trim();
 
           if (typeof content === 'string' && role !== 'toolResult') {
@@ -288,23 +296,9 @@ async function classifyAgent(agent: string) {
     if (recent.mtime <= prevMtime) return;
     lastSeen.set(agent, recent.mtime);
 
-    // MiniMax classifies state; use conversation text as detail
+    // MiniMax classifies state and generates a plain-English summary
     const classification = await classifyWithMinimax(agent, recent.text);
-    // Get the longest lines from the conversation as detail
-    const lines = recent.text.split('\n')
-      .map(l => l.trim())
-      .filter(l => l.length > 30
-        && !l.startsWith('System')
-        && !l.startsWith('|')
-        && !l.startsWith('[slack')
-        && !l.startsWith('slack:')
-        && !l.startsWith('Slack')
-        && !l.match(/^\[?\d{4}-\d{2}-\d{2}/)
-        && !l.startsWith('cron')
-        && !l.startsWith('message_id')
-      );
-    lines.sort((a, b) => b.length - a.length);
-    const detail = lines.slice(0, 2).join(' ').slice(0, 500) || classification.detail;
+    const detail = classification.detail || 'Working on a task';
     await updateState(agent, classification.state, detail);
 
     const apiLabel = MINIMAX_API_KEY ? 'minimax' : 'heuristic';
@@ -405,9 +399,7 @@ async function main() {
       if (ageMs < 2 * 60 * 1000) {
         // Very recent — classify now
         const classification = await classifyWithMinimax(agent, recent.text);
-        const initLines = recent.text.split('\n').filter(l => l.trim().length > 20);
-        const initExcerpt = initLines.slice(-3).map(l => l.trim()).join(' ');
-        await updateState(agent, classification.state, initExcerpt.length > 20 ? initExcerpt : classification.detail);
+        await updateState(agent, classification.state, classification.detail || 'Working on a task');
         const apiLabel = MINIMAX_API_KEY ? 'minimax' : 'heuristic';
         console.log(`[${new Date().toLocaleTimeString()}] ${agent}: ${classification.state} — ${classification.detail} (${apiLabel})`);
       }

@@ -5,7 +5,7 @@ import { SlackVisitor } from '@/lib/visitors';
 import { AGENTS_DIR } from '@/lib/paths';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
+function getSlackToken() { return process.env.SLACK_BOT_TOKEN || ''; }
 
 // Cache Slack user profiles to avoid hammering the API
 const userProfileCache = new Map<string, { name: string; avatarUrl: string; cachedAt: number }>();
@@ -21,6 +21,7 @@ async function resolveSlackUser(userId: string): Promise<{ name: string; avatarU
     return { name: cached.name, avatarUrl: cached.avatarUrl };
   }
 
+  const SLACK_BOT_TOKEN = getSlackToken();
   if (!SLACK_BOT_TOKEN) {
     return { name: cleanId, avatarUrl: '' };
   }
@@ -39,6 +40,8 @@ async function resolveSlackUser(userId: string): Promise<{ name: string; avatarU
         const avatarUrl = profile.image_72 || profile.image_48 || '';
         userProfileCache.set(cleanId, { name, avatarUrl, cachedAt: Date.now() });
         return { name, avatarUrl };
+      } else {
+        console.error(`Slack users.info failed for ${cleanId}:`, data.error || 'unknown');
       }
     } else if (cleanId.startsWith('C') || cleanId.startsWith('G')) {
       // Channel or group ID — try to get channel name
@@ -57,7 +60,9 @@ async function resolveSlackUser(userId: string): Promise<{ name: string; avatarU
       userProfileCache.set(cleanId, { name: channelName, avatarUrl: '', cachedAt: Date.now() });
       return { name: channelName, avatarUrl: '' };
     }
-  } catch {}
+  } catch (err) {
+    console.error(`Slack resolve error for ${cleanId}:`, err);
+  }
 
   return { name: cleanId, avatarUrl: '' };
 }
@@ -117,7 +122,9 @@ export async function GET() {
   await Promise.all(visitorList.map(async (v) => {
     const profile = await resolveSlackUser(v.id);
     v.name = profile.name;
-    v.avatarUrl = profile.avatarUrl || v.avatarUrl;
+    // Proxy avatar through our API to avoid CORS issues
+    const rawUrl = profile.avatarUrl || v.avatarUrl;
+    v.avatarUrl = rawUrl ? `/api/avatar?url=${encodeURIComponent(rawUrl)}` : '';
   }));
 
   return NextResponse.json(visitorList);
