@@ -945,6 +945,7 @@ interface VisitorAnim {
   chatState: 'entering' | 'walking_to_agent' | 'chatting' | 'leaving';
   waypoints: { x: number; y: number }[];
   waypointIndex: number;
+  chatTimer: number;
   avatarImg: HTMLImageElement | null;
   avatarLoaded: boolean;
   avatarUrl: string | undefined;
@@ -1301,6 +1302,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         chatState: 'entering',
         waypoints: [],
         waypointIndex: 0,
+        chatTimer: 0,
         avatarImg: null, avatarLoaded: false, avatarUrl: sv.avatarUrl,
       };
 
@@ -1670,13 +1672,41 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           v.x = v.targetX;
           v.y = v.targetY;
 
-          if (v.waypoints.length > 0 && v.waypointIndex < v.waypoints.length - 1) {
+          if (v.waypoints.length > 0) {
             v.waypointIndex++;
-            v.targetX = v.waypoints[v.waypointIndex].x;
-            v.targetY = v.waypoints[v.waypointIndex].y;
-          } else if (v.chatState === 'entering' || v.chatState === 'walking_to_agent') {
-            v.chatState = 'chatting';
-            v.waypoints = [];
+            if (v.waypointIndex < v.waypoints.length) {
+              v.targetX = v.waypoints[v.waypointIndex].x;
+              v.targetY = v.waypoints[v.waypointIndex].y;
+            } else {
+              v.waypoints = [];
+              v.waypointIndex = 0;
+              if (v.chatState === 'entering') {
+                // Arrived at spawn — now walk to the target agent
+                v.chatState = 'walking_to_agent';
+                // Find the agent and pathfind to them
+                const targetAgent = anim.agents.find(a => a.label === v.targetAgentLabel);
+                if (targetAgent) {
+                  const vi = anim.visitors.indexOf(v);
+                  const angle = (vi * 1.5 + 0.5) % (Math.PI * 2);
+                  const offX = Math.cos(angle) * 30;
+                  const offY = Math.sin(angle) * 30;
+                  setWaypoints(v, pathTo(v.x, v.y, targetAgent.x + offX, targetAgent.y + offY));
+                }
+              } else if (v.chatState === 'walking_to_agent') {
+                v.chatState = 'chatting';
+                v.chatTimer = 0;
+              }
+            }
+          }
+        }
+
+        // Visitor chat timer — auto-leave after 20 seconds
+        if (v.chatState === 'chatting') {
+          v.chatTimer += dt;
+          if (v.chatTimer > 20000) {
+            v.chatState = 'leaving';
+            setWaypoints(v, pathTo(v.x, v.y, -30, v.y));
+            v.chatTimer = 0;
           }
         }
 
@@ -1759,7 +1789,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
 
         // Speech bubble when chatting
         if (v.chatState === 'chatting') {
-          const bubbleText = `Hey ${v.targetAgentLabel}!`;
+          const bubbleText = `${v.name} chatting with ${v.targetAgentLabel}`;
           drawSpeechBubble(ctx, v.x + 2, v.y + v.bobOffset - 16, bubbleText, '#4A154B');
         }
       }
