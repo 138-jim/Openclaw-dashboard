@@ -318,7 +318,7 @@ function pathTo(fromX: number, fromY: number, toX: number, toY: number): { x: nu
   const path = aStar(fromX, fromY, toX, toY);
   const dest = { x: toX, y: toY };
   if (path.length === 0) {
-    // Find nearest graph node as intermediate
+    // No A* path — find nearest graph node as intermediate
     let bestNode: { x: number; y: number } | null = null;
     let bestDist = Infinity;
     navGraph.forEach((node) => {
@@ -330,15 +330,30 @@ function pathTo(fromX: number, fromY: number, toX: number, toY: number): { x: nu
   }
   // Always append exact destination
   path.push(dest);
+  // Remove any initial waypoints that are BEHIND the start (would cause backward movement)
+  while (path.length > 1) {
+    const first = path[0];
+    const distToFirst = Math.hypot(first.x - fromX, first.y - fromY);
+    const distFirstToDest = Math.hypot(first.x - toX, first.y - toY);
+    const distStartToDest = Math.hypot(fromX - toX, fromY - toY);
+    // If going to the first waypoint would take us further from the destination, skip it
+    if (distToFirst > 5 && distFirstToDest > distStartToDest + 10) {
+      path.shift();
+    } else {
+      break;
+    }
+  }
   return path;
 }
 
-function setWaypoints(entity: { waypoints: {x:number;y:number}[]; waypointIndex: number; targetX: number; targetY: number }, wp: {x:number;y:number}[]) {
-  entity.waypoints = wp;
+function setWaypoints(entity: { x: number; y: number; waypoints: {x:number;y:number}[]; waypointIndex: number; targetX: number; targetY: number }, wp: {x:number;y:number}[]) {
+  // Filter out waypoints that are at or very near the entity's current position
+  const filtered = wp.filter(p => Math.hypot(p.x - entity.x, p.y - entity.y) > 3);
+  entity.waypoints = filtered;
   entity.waypointIndex = 0;
-  if (wp.length > 0) {
-    entity.targetX = wp[0].x;
-    entity.targetY = wp[0].y;
+  if (filtered.length > 0) {
+    entity.targetX = filtered[0].x;
+    entity.targetY = filtered[0].y;
   }
 }
 
