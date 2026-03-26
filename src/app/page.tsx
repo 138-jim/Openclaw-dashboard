@@ -1,5 +1,5 @@
 'use client';
-import PixelOffice3D from '@/components/PixelOffice3D';
+import PixelOffice from '@/components/PixelOffice';
 import AgentCard from '@/components/AgentCard';
 import { useAgents, useConversations, useVisitors } from '@/components/DashboardShell';
 import PageTransition from '@/components/PageTransition';
@@ -22,7 +22,7 @@ export default function OfficePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-purple-500/10 to-blue-500/5 opacity-50 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
         <div className="relative rounded-xl overflow-hidden bg-[#05050a] border border-white/5">
            <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none" />
-           <PixelOffice3D agents={agents} conversations={conversations} visitors={visitors} />
+           <PixelOffice agents={agents} conversations={conversations} visitors={visitors} />
         </div>
       </div>
 

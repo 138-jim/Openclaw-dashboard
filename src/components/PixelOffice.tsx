@@ -62,17 +62,6 @@ function hexToRgba(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
-function darken(hex: string, amt: number): string {
-  let r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-  r = Math.max(0, r - amt); g = Math.max(0, g - amt); b = Math.max(0, b - amt);
-  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
-}
-
-function lighten(hex: string, amt: number): string {
-  let r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-  r = Math.min(255, r + amt); g = Math.min(255, g + amt); b = Math.min(255, b + amt);
-  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
-}
 
 // ─── Room geometry helpers ──────────────────────────────────────────────────
 function getRoomOrigin(index: number): { x: number; y: number } {
@@ -165,13 +154,6 @@ function buildNavGraph() {
       // Room below (row r+1) — door is at bottom, corridor is above
       const roomBelow = (row + 1) * COLS + col;
       const doorBelow = getDoorPos(roomBelow);
-      // For the room below, its door is at the bottom — we need to connect
-      // to the corridor above it. The corridor above row+1 is corridor row.
-      // But the door of roomBelow is at the bottom of roomBelow, which connects
-      // to corridor row+1 (if it exists) or corridor row.
-      // Actually: room (row+1) door connects to the corridor below it (row+1)
-      // if it exists, or the one above (row). For simplicity, also connect
-      // roomBelow's door to this corridor if it's adjacent.
       if (row + 1 < ROWS - 1) {
         // roomBelow connects to corridor row+1, not this one
       } else {
@@ -184,8 +166,6 @@ function buildNavGraph() {
       }
     }
 
-    // Also: rooms in row+1 have doors that go DOWN to corridor row+1,
-    // but we need them accessible from corridor row too via v-corridors.
     // V-corridor intersection nodes
     for (let col = 0; col < COLS - 1; col++) {
       const cx = vCorridorX(col);
@@ -220,24 +200,16 @@ function buildNavGraph() {
   }
 
   // Connect rooms in row+1..row+2..etc doors to the corridor above them
-  // (rooms not in the last row connect to the corridor below them,
-  //  which is handled above. Rooms in middle rows also connect to corridor above.)
   for (let row = 1; row < ROWS; row++) {
     const cyAbove = hCorridorY(row - 1);
     for (let col = 0; col < COLS; col++) {
       const room = row * COLS + col;
       const door = getDoorPos(room);
-      // If this room's door is close to the corridor above (within ROOM_H),
-      // connect it. Actually doors are at room bottom, corridor row-1 is above.
-      // Need a node on corridor row-1 at this door's x.
       if (row - 1 >= 0 && row < ROWS) {
-        // Check if we already have a hc node for this door on corridor row-1
         const existingId = `hc_${row - 1}_door_${room}`;
         if (!navGraph.has(existingId)) {
           addNode(existingId, door.x, cyAbove);
           addEdge(`door_${room}`, existingId);
-          // Connect to nearest h-corridor neighbors
-          // Find the intersections on corridor row-1 to the left and right
           const col_left = col > 0 ? col - 1 : -1;
           const col_right = col < COLS - 1 ? col : -1;
           if (col_left >= 0 && navGraph.has(`int_${row - 1}_${col_left}`)) {
@@ -246,14 +218,12 @@ function buildNavGraph() {
           if (col_right >= 0 && navGraph.has(`int_${row - 1}_${col_right}`)) {
             addEdge(existingId, `int_${row - 1}_${col_right}`);
           }
-          // Connect to other door projections on same corridor
           for (let c2 = 0; c2 < COLS; c2++) {
             const otherId = `hc_${row - 1}_door_${(row - 1) * COLS + c2}`;
             if (navGraph.has(otherId)) addEdge(existingId, otherId);
             const otherId2 = `hc_${row - 1}_door_${row * COLS + c2}`;
             if (navGraph.has(otherId2) && otherId2 !== existingId) addEdge(existingId, otherId2);
           }
-          // Connect to break corridor
           if (navGraph.has(`int_${row - 1}_break`)) {
             addEdge(existingId, `int_${row - 1}_break`);
           }
@@ -291,8 +261,6 @@ function aStar(startX: number, startY: number, endX: number, endY: number): { x:
     return [{ x: endX, y: endY }];
   }
 
-  // A* search
-  // Use plain objects for ES5 compatibility (no for...of on Map/Set)
   const openList = [bestStartId];
   const closedSet: Record<string, boolean> = {};
   const cameFrom: Record<string, string> = {};
@@ -304,7 +272,6 @@ function aStar(startX: number, startY: number, endX: number, endY: number): { x:
   fScore[bestStartId] = Math.hypot(navGraph.get(bestStartId)!.x - endNode.x, navGraph.get(bestStartId)!.y - endNode.y);
 
   while (openList.length > 0) {
-    // Find node in openList with lowest fScore
     let bestIdx = 0;
     for (let i = 1; i < openList.length; i++) {
       if ((fScore[openList[i]] ?? Infinity) < (fScore[openList[bestIdx]] ?? Infinity)) {
@@ -314,7 +281,6 @@ function aStar(startX: number, startY: number, endX: number, endY: number): { x:
     const current = openList[bestIdx];
 
     if (current === bestEndId) {
-      // Reconstruct path
       const path: { x: number; y: number }[] = [];
       let c = current;
       while (cameFrom[c]) {
@@ -369,65 +335,109 @@ function getRoomDecorations(label: string): [DecorationType, DecorationType] {
     : [d1, d2];
 }
 
-// ─── Drawing helpers ────────────────────────────────────────────────────────
-function drawRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
-}
+// ─── Drawing helpers (flat vector style) ─────────────────────────────────────
+const FONT = 'system-ui, -apple-system, sans-serif';
 
-function drawPixelText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, size = 8) {
+function drawCleanText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, size = 10) {
   ctx.fillStyle = color;
-  ctx.font = `bold ${size}px monospace`;
+  ctx.font = `${size}px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(text, Math.floor(x), Math.floor(y));
+  ctx.fillText(text, x, y);
 }
 
-// ─── Furniture drawing ──────────────────────────────────────────────────────
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, color: string) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  ctx.fill();
+}
+
+function setShadow(ctx: CanvasRenderingContext2D, blur: number, offsetX = 0, offsetY = 2, color = 'rgba(0,0,0,0.12)') {
+  ctx.shadowColor = color;
+  ctx.shadowBlur = blur;
+  ctx.shadowOffsetX = offsetX;
+  ctx.shadowOffsetY = offsetY;
+}
+
+function clearShadow(ctx: CanvasRenderingContext2D) {
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+}
+
+// ─── Furniture drawing (flat vector) ─────────────────────────────────────────
 
 function drawDesk(ctx: CanvasRenderingContext2D, x: number, y: number, glowColor?: string) {
-  drawRect(ctx, x + 2, y + 18, 40, 3, 'rgba(0,0,0,0.15)');
-  drawRect(ctx, x + 2, y + 12, 2, 8, '#6D4C41');
-  drawRect(ctx, x + 36, y + 12, 2, 8, '#6D4C41');
-  drawRect(ctx, x, y + 10, 40, 4, '#8D6E63');
-  drawRect(ctx, x + 1, y + 10, 38, 1, '#A1887F');
-  drawRect(ctx, x + 14, y + 1, 14, 10, '#37474F');
-  drawRect(ctx, x + 15, y + 2, 12, 7, glowColor || '#263238');
-  drawRect(ctx, x + 19, y + 10, 4, 2, '#546E7A');
-  if (glowColor && glowColor !== '#263238') {
-    ctx.fillStyle = hexToRgba(glowColor, 0.08);
-    ctx.fillRect(x + 8, y - 2, 26, 18);
+  // Desk surface
+  setShadow(ctx, 4, 0, 2);
+  roundRect(ctx, x, y + 10, 40, 6, 3, '#A1887F');
+  clearShadow(ctx);
+  roundRect(ctx, x + 1, y + 11, 38, 4, 2, '#BCAAA4');
+  // Desk legs
+  roundRect(ctx, x + 3, y + 16, 3, 6, 1, '#8D6E63');
+  roundRect(ctx, x + 34, y + 16, 3, 6, 1, '#8D6E63');
+  // Monitor
+  setShadow(ctx, 3, 0, 1);
+  roundRect(ctx, x + 12, y, 16, 11, 2, '#455A64');
+  clearShadow(ctx);
+  roundRect(ctx, x + 13, y + 1, 14, 9, 1.5, glowColor || '#37474F');
+  // Monitor stand
+  roundRect(ctx, x + 18, y + 11, 4, 2, 1, '#607D8B');
+  // Keyboard
+  roundRect(ctx, x + 10, y + 12, 14, 3, 1.5, '#B0BEC5');
+  // Screen glow
+  if (glowColor && glowColor !== '#37474F') {
+    ctx.fillStyle = hexToRgba(glowColor, 0.06);
+    ctx.beginPath();
+    ctx.roundRect(x + 6, y - 3, 28, 20, 4);
+    ctx.fill();
   }
-  drawRect(ctx, x + 12, y + 11, 10, 2, '#90A4AE');
-  drawRect(ctx, x + 13, y + 11, 8, 1, '#B0BEC5');
 }
 
 function drawChair(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  drawRect(ctx, x, y, 12, 4, '#455A64');
-  drawRect(ctx, x + 1, y, 10, 1, '#546E7A');
-  drawRect(ctx, x + 1, y - 8, 10, 9, '#37474F');
-  drawRect(ctx, x + 2, y - 7, 8, 7, '#455A64');
-  drawRect(ctx, x + 2, y + 4, 2, 4, '#333');
-  drawRect(ctx, x + 8, y + 4, 2, 4, '#333');
-  drawRect(ctx, x + 1, y + 7, 3, 2, '#555');
-  drawRect(ctx, x + 8, y + 7, 3, 2, '#555');
+  // Seat
+  roundRect(ctx, x, y, 12, 5, 3, '#546E7A');
+  // Back
+  roundRect(ctx, x + 1, y - 8, 10, 9, 3, '#455A64');
+  // Legs
+  roundRect(ctx, x + 2, y + 5, 2, 4, 1, '#78909C');
+  roundRect(ctx, x + 8, y + 5, 2, 4, 1, '#78909C');
+  // Wheels
+  ctx.fillStyle = '#90A4AE';
+  ctx.beginPath(); ctx.arc(x + 3, y + 9, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 9, y + 9, 1.5, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawPlant(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  drawRect(ctx, x, y + 6, 8, 6, '#D84315');
-  drawRect(ctx, x - 1, y + 5, 10, 2, '#BF360C');
-  drawRect(ctx, x + 1, y + 7, 6, 1, '#E64A19');
-  drawRect(ctx, x + 1, y + 5, 6, 1, '#3E2723');
-  drawRect(ctx, x + 2, y + 1, 4, 5, '#2E7D32');
-  drawRect(ctx, x, y - 1, 3, 4, '#388E3C');
-  drawRect(ctx, x + 5, y, 3, 3, '#43A047');
-  drawRect(ctx, x + 3, y - 2, 2, 3, '#1B5E20');
+  // Pot
+  roundRect(ctx, x, y + 6, 8, 6, 2, '#D84315');
+  roundRect(ctx, x - 1, y + 5, 10, 2, 1, '#BF360C');
+  // Stem
+  roundRect(ctx, x + 3, y + 2, 2, 4, 1, '#4CAF50');
+  // Foliage (circles)
+  ctx.fillStyle = '#43A047';
+  ctx.beginPath(); ctx.arc(x + 4, y + 1, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#66BB6A';
+  ctx.beginPath(); ctx.arc(x + 1, y + 2, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#388E3C';
+  ctx.beginPath(); ctx.arc(x + 6, y + 2, 3, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawLamp(ctx: CanvasRenderingContext2D, x: number, y: number, on: boolean) {
-  drawRect(ctx, x + 3, y, 2, 20, '#757575');
-  drawRect(ctx, x - 2, y - 4, 12, 5, on ? '#FFF59D' : '#9E9E9E');
-  drawRect(ctx, x - 1, y - 3, 10, 3, on ? '#FFF176' : '#BDBDBD');
+  // Stand
+  roundRect(ctx, x + 3, y + 2, 2, 18, 1, '#9E9E9E');
+  // Shade (triangle-ish shape)
+  ctx.fillStyle = on ? '#FFF59D' : '#BDBDBD';
+  ctx.beginPath();
+  ctx.moveTo(x - 2, y);
+  ctx.lineTo(x + 10, y);
+  ctx.lineTo(x + 7, y - 6);
+  ctx.lineTo(x + 1, y - 6);
+  ctx.closePath();
+  ctx.fill();
+  // Light glow
   if (on) {
     ctx.fillStyle = 'rgba(255,245,157,0.06)';
     ctx.beginPath();
@@ -437,127 +447,162 @@ function drawLamp(ctx: CanvasRenderingContext2D, x: number, y: number, on: boole
 }
 
 function drawCoffeeMachine(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
-  drawRect(ctx, x + 3, y + 28, 22, 3, 'rgba(0,0,0,0.12)');
-  drawRect(ctx, x, y, 24, 30, '#455A64');
-  drawRect(ctx, x + 1, y + 1, 22, 28, '#546E7A');
-  drawRect(ctx, x + 3, y + 3, 18, 10, '#263238');
-  drawRect(ctx, x + 5, y + 15, 3, 3, '#4CAF50');
-  drawRect(ctx, x + 10, y + 15, 3, 3, '#F44336');
-  drawRect(ctx, x + 15, y + 15, 3, 3, '#FFC107');
-  drawRect(ctx, x + 6, y + 20, 12, 8, '#37474F');
-  drawRect(ctx, x + 8, y + 22, 8, 5, '#263238');
-  drawRect(ctx, x + 9, y + 23, 6, 4, '#ECEFF1');
-  const steamPhases = [0, 2.1, 4.2];
+  setShadow(ctx, 3, 0, 2);
+  roundRect(ctx, x, y, 24, 30, 3, '#546E7A');
+  clearShadow(ctx);
+  roundRect(ctx, x + 2, y + 2, 20, 10, 2, '#37474F');
+  // Buttons
+  ctx.fillStyle = '#4CAF50';
+  ctx.beginPath(); ctx.arc(x + 7, y + 16, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#F44336';
+  ctx.beginPath(); ctx.arc(x + 13, y + 16, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#FFC107';
+  ctx.beginPath(); ctx.arc(x + 19, y + 16, 2, 0, Math.PI * 2); ctx.fill();
+  // Cup area
+  roundRect(ctx, x + 6, y + 20, 12, 8, 2, '#37474F');
+  roundRect(ctx, x + 8, y + 22, 8, 5, 1.5, '#ECEFF1');
+  // Steam
   ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  for (const phase of steamPhases) {
+  for (const phase of [0, 2.1, 4.2]) {
     const t = (time * 0.002 + phase) % 3;
     if (t < 2) {
       const sy = y - 2 - t * 6;
       const sx = x + 11 + Math.sin(t * 3 + phase) * 2;
-      const size = 1 + (1 - t / 2) * 1.5;
       ctx.globalAlpha = 0.3 * (1 - t / 2);
-      ctx.fillRect(Math.floor(sx), Math.floor(sy), Math.ceil(size), Math.ceil(size));
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   ctx.globalAlpha = 1;
 }
 
 function drawBookshelf(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  drawRect(ctx, x, y, 40, 50, '#4E342E');
-  drawRect(ctx, x + 2, y + 2, 36, 46, '#5D4037');
+  setShadow(ctx, 3, 0, 2);
+  roundRect(ctx, x, y, 40, 50, 3, '#5D4037');
+  clearShadow(ctx);
+  roundRect(ctx, x + 2, y + 2, 36, 46, 2, '#6D4C41');
   const bookColors = ['#C62828','#1565C0','#2E7D32','#F9A825','#6A1B9A','#00838F','#EF6C00','#AD1457'];
   for (let s = 0; s < 3; s++) {
     const sy = y + 4 + s * 15;
-    drawRect(ctx, x + 2, sy + 12, 36, 2, '#3E2723');
+    roundRect(ctx, x + 2, sy + 12, 36, 2, 1, '#3E2723');
     let bx = x + 3;
     for (let b = 0; b < 6; b++) {
       const bw = 3 + (s * 3 + b) % 3;
       const bh = 10 + (b % 2);
       const bc = bookColors[(s * 6 + b) % bookColors.length];
-      drawRect(ctx, bx, sy + 12 - bh, bw, bh, bc);
-      drawRect(ctx, bx, sy + 12 - bh, bw, 1, lighten(bc, 30));
+      roundRect(ctx, bx, sy + 12 - bh, bw, bh, 1, bc);
       bx += bw + 1;
     }
   }
 }
 
 function drawServerRack(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
-  drawRect(ctx, x + 3, y + 48, 28, 4, 'rgba(0,0,0,0.15)');
-  drawRect(ctx, x, y, 30, 50, '#263238');
-  drawRect(ctx, x + 1, y + 1, 28, 48, '#37474F');
+  setShadow(ctx, 3, 0, 2);
+  roundRect(ctx, x, y, 30, 50, 3, '#37474F');
+  clearShadow(ctx);
+  roundRect(ctx, x + 1, y + 1, 28, 48, 2, '#455A64');
   for (let u = 0; u < 5; u++) {
     const uy = y + 3 + u * 9;
-    drawRect(ctx, x + 3, uy, 24, 7, '#1a1a2e');
-    drawRect(ctx, x + 4, uy + 1, 22, 1, '#2d2d44');
-    for (let v = 0; v < 4; v++) {
-      drawRect(ctx, x + 14 + v * 3, uy + 3, 1, 2, '#111');
-    }
+    roundRect(ctx, x + 3, uy, 24, 7, 2, '#263238');
   }
-  // Inline LEDs
+  // LEDs
   const ledColors = ['#4CAF50', '#F44336', '#2196F3', '#FFC107'];
   for (let i = 0; i < 6; i++) {
-    const lx = x + 5 + (i % 3) * 3;
-    const ly = y + 5 + Math.floor(i / 3) * 9;
+    const lx = x + 6 + (i % 3) * 4;
+    const ly = y + 6 + Math.floor(i / 3) * 9;
     const phase = i * 1.7;
     const on = Math.sin(time * 0.003 * (0.5 + (i % 3) * 0.5) + phase) > 0;
+    const c = on ? ledColors[i % ledColors.length] : '#1a1a1a';
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 1.5, 0, Math.PI * 2);
+    ctx.fill();
     if (on) {
-      const c = ledColors[i % ledColors.length];
-      drawRect(ctx, lx, ly, 2, 2, c);
-      ctx.fillStyle = hexToRgba(c, 0.15);
-      ctx.fillRect(lx - 1, ly - 1, 4, 4);
-    } else {
-      drawRect(ctx, lx, ly, 2, 2, '#1a1a1a');
+      ctx.fillStyle = hexToRgba(ledColors[i % ledColors.length], 0.2);
+      ctx.beginPath();
+      ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 }
 
 function drawFramedPicture(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  drawRect(ctx, x, y, 30, 24, '#5D4037');
-  drawRect(ctx, x + 1, y + 1, 28, 22, '#6D4C41');
-  drawRect(ctx, x + 3, y + 3, 24, 18, '#E8D5B7');
-  drawRect(ctx, x + 3, y + 3, 24, 9, '#87CEEB');
-  drawRect(ctx, x + 3, y + 12, 24, 9, '#4CAF50');
-  drawRect(ctx, x + 20, y + 5, 4, 4, '#FFD700');
-  for (let i = 0; i < 8; i++) {
-    drawRect(ctx, x + 7 + i, y + 10 - Math.floor(Math.abs(i - 4) * 0.5), 1, 2, '#388E3C');
-  }
+  setShadow(ctx, 3, 0, 1);
+  roundRect(ctx, x, y, 30, 24, 2, '#6D4C41');
+  clearShadow(ctx);
+  roundRect(ctx, x + 2, y + 2, 26, 20, 1, '#E8D5B7');
+  // Sky
+  roundRect(ctx, x + 2, y + 2, 26, 10, 0, '#87CEEB');
+  // Hills
+  roundRect(ctx, x + 2, y + 12, 26, 10, 0, '#81C784');
+  // Sun
+  ctx.fillStyle = '#FFD54F';
+  ctx.beginPath(); ctx.arc(x + 22, y + 7, 3, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawClock(ctx: CanvasRenderingContext2D, cx: number, cy: number, _time: number) {
   const now = new Date();
   const hours = now.getHours() % 12;
   const minutes = now.getMinutes();
-  drawRect(ctx, cx - 11, cy - 11, 22, 22, '#5D4037');
-  drawRect(ctx, cx - 10, cy - 10, 20, 20, '#FFFDE7');
+
+  setShadow(ctx, 3, 0, 1);
+  ctx.fillStyle = '#FFFDE7';
+  ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.fill();
+  clearShadow(ctx);
+  // Frame
+  ctx.strokeStyle = '#8D6E63';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.stroke();
+  // Hour marks
   for (let h = 0; h < 12; h++) {
     const angle = (h / 12) * Math.PI * 2 - Math.PI / 2;
-    const dx = Math.round(Math.cos(angle) * 7);
-    const dy = Math.round(Math.sin(angle) * 7);
-    drawRect(ctx, cx + dx, cy + dy, 1, 1, '#333');
+    ctx.fillStyle = '#8D6E63';
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(angle) * 8, cy + Math.sin(angle) * 8, 1, 0, Math.PI * 2);
+    ctx.fill();
   }
+  // Hour hand
   const hAngle = ((hours + minutes / 60) / 12) * Math.PI * 2 - Math.PI / 2;
-  for (let i = 0; i < 5; i++) {
-    drawRect(ctx, Math.round(cx + Math.cos(hAngle) * i), Math.round(cy + Math.sin(hAngle) * i), 1, 1, '#333');
-  }
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(hAngle) * 5, cy + Math.sin(hAngle) * 5);
+  ctx.stroke();
+  // Minute hand
   const mAngle = (minutes / 60) * Math.PI * 2 - Math.PI / 2;
-  for (let i = 0; i < 7; i++) {
-    drawRect(ctx, Math.round(cx + Math.cos(mAngle) * i), Math.round(cy + Math.sin(mAngle) * i), 1, 1, '#666');
-  }
-  drawRect(ctx, cx, cy, 1, 1, '#C62828');
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(mAngle) * 7, cy + Math.sin(mAngle) * 7);
+  ctx.stroke();
+  // Center dot
+  ctx.fillStyle = '#C62828';
+  ctx.beginPath(); ctx.arc(cx, cy, 1.5, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawWhiteboard(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  drawRect(ctx, x, y, 50, 32, '#BDBDBD');
-  drawRect(ctx, x + 2, y + 2, 46, 28, '#FAFAFA');
+  setShadow(ctx, 3, 0, 1);
+  roundRect(ctx, x, y, 50, 32, 3, '#E0E0E0');
+  clearShadow(ctx);
+  roundRect(ctx, x + 2, y + 2, 46, 28, 2, '#FAFAFA');
+  // Lines of text
   for (let i = 0; i < 4; i++) {
-    const sy = y + 6 + i * 6;
+    const sy = y + 7 + i * 6;
     const sw = 20 + (i * 7) % 15;
-    drawRect(ctx, x + 6, sy, sw, 1, '#1565C0');
+    roundRect(ctx, x + 6, sy, sw, 2, 1, '#90CAF9');
   }
-  drawRect(ctx, x + 38, y + 8, 3, 3, '#E53935');
-  drawRect(ctx, x + 5, y + 32, 40, 3, '#9E9E9E');
-  drawRect(ctx, x + 10, y + 31, 4, 2, '#F44336');
-  drawRect(ctx, x + 16, y + 31, 4, 2, '#2196F3');
+  // Red dot
+  ctx.fillStyle = '#E53935';
+  ctx.beginPath(); ctx.arc(x + 40, y + 10, 2, 0, Math.PI * 2); ctx.fill();
+  // Tray
+  roundRect(ctx, x + 5, y + 32, 40, 3, 1, '#BDBDBD');
+  // Markers
+  roundRect(ctx, x + 10, y + 31, 5, 2, 1, '#F44336');
+  roundRect(ctx, x + 17, y + 31, 5, 2, 1, '#2196F3');
 }
 
 // Draw a decoration in a room at a given position
@@ -574,10 +619,8 @@ function drawDecoration(ctx: CanvasRenderingContext2D, type: DecorationType, x: 
   }
 }
 
-// ─── Room drawing ───────────────────────────────────────────────────────────
-// Modern light wood floor
-const FLOOR_COLORS = ['#D4B896','#CEAE88','#D9BD9C','#C9A87C','#D0B490'];
-// Accent wall colors per room — warm, modern palette
+// ─── Room drawing (flat vector) ─────────────────────────────────────────────
+// Accent wall colors per room — muted modern palette
 const ACCENT_WALLS = [
   '#5B7FA5','#7B6B8D','#6B8E6B','#B0785A','#5A8A8A','#8B6B6B','#6B7B8B','#8A7B5A',
   '#6B8B7B','#7B6B7B','#5B8B6B','#8B7B6B','#6B6B8B','#7B8B5B','#8B5B6B','#5B7B8B',
@@ -586,114 +629,86 @@ const ACCENT_WALLS = [
 
 function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: string, name: string, emoji: string, glowColor: string | undefined, isError: boolean, time: number) {
   const o = getRoomOrigin(roomIndex);
-  const wallH = 40;
-  const wallThick = 5;
   const accent = ACCENT_WALLS[roomIndex % ACCENT_WALLS.length];
 
-  // ── Floor: warm hardwood ──
-  drawRect(ctx, o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, ROOM_H - wallH, '#C8B08A');
-  const plankW = 18, plankH = 9;
-  for (let y = o.y + wallH; y < o.y + ROOM_H; y += plankH) {
-    const rowOff = ((y - o.y) / plankH) % 2 === 0 ? 0 : plankW / 2;
-    for (let x = o.x + wallThick; x < o.x + ROOM_W - wallThick; x += plankW) {
-      const px = x + rowOff;
-      if (px >= o.x + ROOM_W - wallThick) continue;
-      const ci = (Math.floor(px / plankW) * 3 + Math.floor(y / plankH) * 7) % FLOOR_COLORS.length;
-      const w = Math.min(plankW, o.x + ROOM_W - wallThick - px);
-      if (w > 0) {
-        drawRect(ctx, px, y, w, plankH, FLOOR_COLORS[ci]);
-        drawRect(ctx, px, y + plankH - 1, w, 1, darken(FLOOR_COLORS[ci], 10));
-      }
-    }
-  }
+  // Room with drop shadow
+  setShadow(ctx, 8, 0, 3, 'rgba(0,0,0,0.08)');
+  roundRect(ctx, o.x, o.y, ROOM_W, ROOM_H, 6, '#F5F0E8');
+  clearShadow(ctx);
 
   // Error red floor glow
   if (isError) {
     const pulse = 0.06 + Math.sin(time * 0.002) * 0.03;
     ctx.fillStyle = `rgba(239,68,68,${pulse})`;
-    ctx.fillRect(o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, ROOM_H - wallH);
+    ctx.beginPath();
+    ctx.roundRect(o.x + 2, o.y + 2, ROOM_W - 4, ROOM_H - 4, 5);
+    ctx.fill();
   }
 
-  // ── Back wall with accent color and window ──
-  drawRect(ctx, o.x, o.y, ROOM_W, wallH, accent);
-  // Gradient overlay for depth
-  const grd = ctx.createLinearGradient(o.x, o.y, o.x, o.y + wallH);
-  grd.addColorStop(0, 'rgba(255,255,255,0.15)');
-  grd.addColorStop(0.7, 'rgba(0,0,0,0)');
-  grd.addColorStop(1, 'rgba(0,0,0,0.12)');
-  ctx.fillStyle = grd;
-  ctx.fillRect(o.x, o.y, ROOM_W, wallH);
+  // Accent stripe along back wall (4px colored bar)
+  roundRect(ctx, o.x + 4, o.y + 4, ROOM_W - 8, 4, 2, accent);
 
-  // Window on back wall (shows sky blue)
-  const winW = 50, winH = 22;
-  const winX = o.x + ROOM_W - 70, winY = o.y + 6;
-  drawRect(ctx, winX - 1, winY - 1, winW + 2, winH + 2, darken(accent, 15)); // frame
-  drawRect(ctx, winX, winY, winW, winH, '#87CEEB'); // sky
-  drawRect(ctx, winX, winY + winH - 6, winW, 6, '#98D8C8'); // distant hills
-  drawRect(ctx, winX + winW / 2, winY, 1, winH, darken(accent, 10)); // divider
-  drawRect(ctx, winX, winY + winH / 2, winW, 1, darken(accent, 10));
-  // Sunlight glow on floor from window
-  ctx.fillStyle = 'rgba(255,250,220,0.06)';
-  ctx.fillRect(o.x + ROOM_W - 90, o.y + wallH, 70, 60);
+  // Window on back wall — simple light blue rounded rect
+  const winW = 44, winH = 20;
+  const winX = o.x + ROOM_W - 65, winY = o.y + 14;
+  setShadow(ctx, 2, 0, 1, 'rgba(0,0,0,0.06)');
+  roundRect(ctx, winX, winY, winW, winH, 3, '#B3E5FC');
+  clearShadow(ctx);
+  // Window frame
+  ctx.strokeStyle = '#90CAF9';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(winX, winY, winW, winH, 3);
+  ctx.stroke();
+  // Window divider
+  ctx.beginPath();
+  ctx.moveTo(winX + winW / 2, winY);
+  ctx.lineTo(winX + winW / 2, winY + winH);
+  ctx.stroke();
 
-  // ── Side walls — clean warm tone ──
-  const wallColor = '#E8E0D4';
-  const wallHighlight = '#F0EAE0';
-  const wallShadow = '#D0C8BC';
+  // Clean thin walls (1px lines, light gray)
+  ctx.strokeStyle = '#D5CEC6';
+  ctx.lineWidth = 1;
   // Left wall
-  drawRect(ctx, o.x, o.y, wallThick, ROOM_H, wallColor);
-  drawRect(ctx, o.x, o.y, 1, ROOM_H, wallShadow);
-  drawRect(ctx, o.x + 1, o.y, 1, ROOM_H, wallHighlight);
+  ctx.beginPath();
+  ctx.moveTo(o.x + 0.5, o.y);
+  ctx.lineTo(o.x + 0.5, o.y + ROOM_H);
+  ctx.stroke();
   // Right wall
-  drawRect(ctx, o.x + ROOM_W - wallThick, o.y, wallThick, ROOM_H, wallColor);
-  drawRect(ctx, o.x + ROOM_W - 1, o.y, 1, ROOM_H, wallShadow);
-  drawRect(ctx, o.x + ROOM_W - 2, o.y, 1, ROOM_H, wallHighlight);
+  ctx.beginPath();
+  ctx.moveTo(o.x + ROOM_W - 0.5, o.y);
+  ctx.lineTo(o.x + ROOM_W - 0.5, o.y + ROOM_H);
+  ctx.stroke();
+  // Top wall
+  ctx.beginPath();
+  ctx.moveTo(o.x, o.y + 0.5);
+  ctx.lineTo(o.x + ROOM_W, o.y + 0.5);
+  ctx.stroke();
 
-  // Bottom wall with door opening
+  // Bottom wall with door gap
   const doorW = 36;
   const doorX = o.x + ROOM_W / 2 - doorW / 2;
-  drawRect(ctx, o.x, o.y + ROOM_H - wallThick, doorX - o.x, wallThick, wallColor);
-  drawRect(ctx, doorX + doorW, o.y + ROOM_H - wallThick, o.x + ROOM_W - doorX - doorW, wallThick, wallColor);
-  // Door frame
-  drawRect(ctx, doorX - 2, o.y + ROOM_H - wallThick, 2, wallThick, '#8D7B6B');
-  drawRect(ctx, doorX + doorW, o.y + ROOM_H - wallThick, 2, wallThick, '#8D7B6B');
-
-  // ── Baseboard — subtle trim ──
-  drawRect(ctx, o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, 2, '#B8A898');
-  drawRect(ctx, o.x + wallThick, o.y + wallH, ROOM_W - wallThick * 2, 1, '#C8B8A8');
-
-  // ── Ceiling light — warm overhead glow ──
-  ctx.fillStyle = 'rgba(255,248,230,0.05)';
   ctx.beginPath();
-  ctx.ellipse(o.x + ROOM_W / 2, o.y + ROOM_H / 2 + 15, 55, 35, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Light fixture
-  drawRect(ctx, o.x + ROOM_W / 2 - 12, o.y + 1, 24, 3, '#F5F0E8');
-  drawRect(ctx, o.x + ROOM_W / 2 - 8, o.y + 4, 16, 2, '#E8E0D0');
+  ctx.moveTo(o.x, o.y + ROOM_H - 0.5);
+  ctx.lineTo(doorX, o.y + ROOM_H - 0.5);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(doorX + doorW, o.y + ROOM_H - 0.5);
+  ctx.lineTo(o.x + ROOM_W, o.y + ROOM_H - 0.5);
+  ctx.stroke();
 
-  // ── Nameplate — mounted on the back wall ──
+  // Nameplate — clean sans-serif, left-aligned
   const plateTxt = `${emoji} ${name}`;
-  ctx.font = 'bold 10px sans-serif';
+  ctx.font = `bold 10px ${FONT}`;
   const tw = ctx.measureText(plateTxt).width;
-  const plateX = o.x + 18;
-  drawRect(ctx, plateX, o.y + 10, tw + 14, 18, 'rgba(0,0,0,0.2)');
-  drawRect(ctx, plateX + 1, o.y + 11, tw + 12, 16, 'rgba(255,255,255,0.12)');
-  ctx.fillStyle = '#FFFFFF';
+  const plateX = o.x + 14;
+  setShadow(ctx, 2, 0, 1, 'rgba(0,0,0,0.05)');
+  roundRect(ctx, plateX, o.y + 14, tw + 12, 16, 4, 'rgba(255,255,255,0.85)');
+  clearShadow(ctx);
+  ctx.fillStyle = '#4A4A4A';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(plateTxt, plateX + 7, o.y + 19);
-
-  // ── Area rug under desk ──
-  const rugX = o.x + 65, rugY = o.y + 100;
-  const rugColor = darken(accent, 15);
-  ctx.fillStyle = rugColor;
-  ctx.beginPath();
-  ctx.roundRect(rugX, rugY, 90, 60, 4);
-  ctx.fill();
-  ctx.fillStyle = lighten(rugColor, 12);
-  ctx.beginPath();
-  ctx.roundRect(rugX + 3, rugY + 3, 84, 54, 3);
-  ctx.fill();
+  ctx.fillText(plateTxt, plateX + 6, o.y + 22);
 
   // Desk + chair
   const deskPos = getDeskPos(roomIndex);
@@ -707,7 +722,19 @@ function drawRoom(ctx: CanvasRenderingContext2D, roomIndex: number, label: strin
   drawDecoration(ctx, dec2, o.x + ROOM_W - 55, o.y + 50, time);
 }
 
-// ─── Break Room ──────────────────────────────────────────────────────────────
+// ─── Break Room (flat vector) ────────────────────────────────────────────────
+
+function drawCouch(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  setShadow(ctx, 4, 0, 2);
+  roundRect(ctx, x, y, 80, 24, 6, '#7B1FA2');
+  clearShadow(ctx);
+  roundRect(ctx, x, y, 80, 10, 5, '#6A1B9A');
+  for (let i = 0; i < 3; i++) {
+    roundRect(ctx, x + 3 + i * 26, y + 10, 22, 12, 3, '#9C27B0');
+  }
+  roundRect(ctx, x - 3, y + 4, 5, 18, 3, '#6A1B9A');
+  roundRect(ctx, x + 78, y + 4, 5, 18, 3, '#6A1B9A');
+}
 
 function getBreakRoomSeat(agentIndex: number): { x: number; y: number } {
   return BREAK_ROOM_SEATS[agentIndex % BREAK_ROOM_SEATS.length];
@@ -726,126 +753,75 @@ function getReturnFromBreakWaypoints(toRoom: number, currentX: number, currentY:
 function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
   const bx = BREAK_ROOM_X, by = 0;
 
-  // Floor — warm carpet
-  const carpetColors = ['#5A4A3A', '#63523F', '#564435', '#5E4E3D'];
-  for (let y = by; y < H; y += 16) {
-    for (let x = bx; x < bx + BREAK_ROOM_W; x += 16) {
-      const ci = (Math.floor(x / 16) + Math.floor(y / 16)) % carpetColors.length;
-      drawRect(ctx, x, y, Math.min(16, bx + BREAK_ROOM_W - x), 16, carpetColors[ci]);
-    }
-  }
+  // Floor — soft warm fill
+  setShadow(ctx, 8, 0, 3, 'rgba(0,0,0,0.06)');
+  roundRect(ctx, bx, by, BREAK_ROOM_W, H, 6, '#EDE7DD');
+  clearShadow(ctx);
 
-  // Left wall / divider
-  const wallX = bx - 4;
-  drawRect(ctx, wallX, 0, 4, H, '#D5CCC0');
-  drawRect(ctx, wallX + 3, 0, 1, H, '#E8E0D4');
+  // Left divider line
+  ctx.strokeStyle = '#D5CEC6';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(bx - 0.5, 0);
+  ctx.lineTo(bx - 0.5, H);
+  ctx.stroke();
 
-  // "BREAK ROOM" sign — vertical banner on the wall
-  ctx.save();
-  ctx.font = 'bold 11px monospace';
-  const signText = '☕ BREAK ROOM';
-  const signW = ctx.measureText(signText).width;
-  drawRect(ctx, bx + 8, 15, signW + 12, 18, 'rgba(0,0,0,0.2)');
-  drawRect(ctx, bx + 9, 16, signW + 10, 16, 'rgba(255,255,255,0.1)');
-  ctx.fillStyle = '#FFF8E1';
+  // "Break Room" label — clean sans-serif
+  ctx.font = `bold 12px ${FONT}`;
+  setShadow(ctx, 2, 0, 1, 'rgba(0,0,0,0.05)');
+  roundRect(ctx, bx + 10, 12, 120, 20, 6, 'rgba(255,255,255,0.85)');
+  clearShadow(ctx);
+  ctx.fillStyle = '#5D4037';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(signText, bx + 14, 24);
-  ctx.restore();
+  ctx.fillText('Break Room', bx + 18, 22);
 
   // Couch (top area)
-  const couchX = bx + 20, couchY = 60;
-  drawRect(ctx, couchX, couchY + 8, 80, 16, '#6A1B9A');
-  drawRect(ctx, couchX, couchY, 80, 10, '#4A148C');
-  drawRect(ctx, couchX + 2, couchY + 2, 76, 6, '#6A1B9A');
-  drawRect(ctx, couchX - 2, couchY + 2, 4, 20, '#4A148C');
-  drawRect(ctx, couchX + 78, couchY + 2, 4, 20, '#4A148C');
-  for (let i = 0; i < 3; i++) {
-    drawRect(ctx, couchX + 3 + i * 25, couchY + 9, 23, 13, '#7B1FA2');
-    drawRect(ctx, couchX + 4 + i * 25, couchY + 10, 21, 1, lighten('#7B1FA2', 20));
-  }
+  drawCouch(ctx, bx + 20, 60);
 
-  // Coffee table
+  // Coffee table — small brown rounded rect
   const ctX = bx + 90, ctY = 130;
-  drawRect(ctx, ctX + 2, ctY + 8, 46, 3, 'rgba(0,0,0,0.1)');
-  drawRect(ctx, ctX + 2, ctY + 5, 2, 5, '#5D4037');
-  drawRect(ctx, ctX + 42, ctY + 5, 2, 5, '#5D4037');
-  drawRect(ctx, ctX, ctY + 3, 46, 3, '#795548');
-  drawRect(ctx, ctX + 1, ctY + 3, 44, 1, '#8D6E63');
-  drawRect(ctx, ctX + 10, ctY, 5, 4, '#ECEFF1');
-  drawRect(ctx, ctX + 11, ctY + 1, 3, 2, '#6D4C41');
-  drawRect(ctx, ctX + 30, ctY, 5, 4, '#ECEFF1');
-  drawRect(ctx, ctX + 31, ctY + 1, 3, 2, '#6D4C41');
+  setShadow(ctx, 3, 0, 1);
+  roundRect(ctx, ctX, ctY, 46, 6, 3, '#8D6E63');
+  clearShadow(ctx);
+  roundRect(ctx, ctX + 1, ctY + 1, 44, 4, 2, '#A1887F');
+  // Coffee cups
+  roundRect(ctx, ctX + 10, ctY - 3, 5, 4, 1.5, '#ECEFF1');
+  roundRect(ctx, ctX + 30, ctY - 3, 5, 4, 1.5, '#ECEFF1');
 
   // Accent rug (middle area)
   const rugX = bx + 30, rugY = 250;
-  ctx.fillStyle = '#7B1FA2';
-  ctx.beginPath();
-  ctx.roundRect(rugX, rugY, 200, 100, 5);
-  ctx.fill();
-  ctx.fillStyle = '#9C27B0';
-  ctx.beginPath();
-  ctx.roundRect(rugX + 4, rugY + 4, 192, 92, 4);
-  ctx.fill();
-  // Diamond pattern
+  roundRect(ctx, rugX, rugY, 200, 100, 8, '#9C27B0');
+  roundRect(ctx, rugX + 4, rugY + 4, 192, 92, 6, '#AB47BC');
+  // Simple dot pattern
+  ctx.fillStyle = '#CE93D8';
   for (let i = 0; i < 5; i++) {
     const dx = rugX + 25 + i * 38;
-    const dy = rugY + 45;
-    drawRect(ctx, dx, dy - 3, 3, 1, '#CE93D8');
-    drawRect(ctx, dx - 1, dy - 2, 5, 1, '#CE93D8');
-    drawRect(ctx, dx - 2, dy - 1, 7, 1, '#CE93D8');
-    drawRect(ctx, dx - 1, dy, 5, 1, '#CE93D8');
-    drawRect(ctx, dx, dy + 1, 3, 1, '#CE93D8');
+    const dy = rugY + 48;
+    ctx.beginPath();
+    ctx.arc(dx, dy, 4, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // Couch (lower area)
-  const couch2X = bx + 20, couch2Y = 380;
-  drawRect(ctx, couch2X, couch2Y + 8, 80, 16, '#6A1B9A');
-  drawRect(ctx, couch2X, couch2Y, 80, 10, '#4A148C');
-  drawRect(ctx, couch2X + 2, couch2Y + 2, 76, 6, '#6A1B9A');
-  drawRect(ctx, couch2X - 2, couch2Y + 2, 4, 20, '#4A148C');
-  drawRect(ctx, couch2X + 78, couch2Y + 2, 4, 20, '#4A148C');
-  for (let i = 0; i < 3; i++) {
-    drawRect(ctx, couch2X + 3 + i * 25, couch2Y + 9, 23, 13, '#7B1FA2');
-  }
+  drawCouch(ctx, bx + 20, 380);
 
   // Coffee machine
-  const cmX = bx + 30, cmY = 500;
-  drawRect(ctx, cmX, cmY, 24, 30, '#455A64');
-  drawRect(ctx, cmX + 1, cmY + 1, 22, 28, '#546E7A');
-  drawRect(ctx, cmX + 3, cmY + 3, 18, 10, '#263238');
-  drawRect(ctx, cmX + 5, cmY + 15, 3, 3, '#4CAF50');
-  drawRect(ctx, cmX + 10, cmY + 15, 3, 3, '#F44336');
-  drawRect(ctx, cmX + 6, cmY + 20, 12, 8, '#37474F');
-  drawRect(ctx, cmX + 8, cmY + 22, 8, 5, '#263238');
-  drawRect(ctx, cmX + 9, cmY + 23, 6, 4, '#ECEFF1');
-  // Steam
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  for (const phase of [0, 2.1, 4.2]) {
-    const t = (time * 0.002 + phase) % 3;
-    if (t < 2) {
-      const sy = cmY - 2 - t * 6;
-      const sx = cmX + 11 + Math.sin(t * 3 + phase) * 2;
-      ctx.globalAlpha = 0.3 * (1 - t / 2);
-      ctx.fillRect(Math.floor(sx), Math.floor(sy), 2, 2);
-    }
-  }
-  ctx.globalAlpha = 1;
+  drawCoffeeMachine(ctx, bx + 30, 500, time);
 
   // Vending machine
   const vmX = bx + 80, vmY = 500;
-  drawRect(ctx, vmX, vmY, 30, 40, '#1565C0');
-  drawRect(ctx, vmX + 1, vmY + 1, 28, 38, '#1976D2');
-  drawRect(ctx, vmX + 3, vmY + 3, 24, 20, '#0D47A1');
+  setShadow(ctx, 4, 0, 2);
+  roundRect(ctx, vmX, vmY, 30, 40, 4, '#1976D2');
+  clearShadow(ctx);
+  roundRect(ctx, vmX + 2, vmY + 2, 26, 22, 3, '#0D47A1');
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
       const color = ['#F44336', '#FFC107', '#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#00BCD4', '#E91E63', '#8BC34A'][(r * 3 + c) % 9];
-      drawRect(ctx, vmX + 5 + c * 7, vmY + 5 + r * 6, 5, 4, color);
+      roundRect(ctx, vmX + 5 + c * 7, vmY + 5 + r * 6, 5, 4, 1.5, color);
     }
   }
-  drawRect(ctx, vmX + 3, vmY + 25, 24, 12, '#0D47A1');
-  ctx.fillStyle = 'rgba(33,150,243,0.05)';
-  ctx.fillRect(vmX - 3, vmY - 3, 36, 46);
+  roundRect(ctx, vmX + 2, vmY + 26, 26, 12, 2, '#0D47A1');
 
   // Plants
   drawPlant(ctx, bx + 15, 160);
@@ -855,86 +831,67 @@ function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
 
   // Potted tree
   const ptX = bx + BREAK_ROOM_W - 50, ptY = 50;
-  drawRect(ctx, ptX, ptY + 16, 12, 10, '#D84315');
-  drawRect(ctx, ptX - 1, ptY + 15, 14, 2, '#BF360C');
-  drawRect(ctx, ptX + 1, ptY + 8, 10, 8, '#2E7D32');
-  drawRect(ctx, ptX - 2, ptY + 4, 8, 8, '#388E3C');
-  drawRect(ctx, ptX + 6, ptY + 2, 8, 8, '#43A047');
-  drawRect(ctx, ptX + 2, ptY - 2, 8, 6, '#1B5E20');
-  drawRect(ctx, ptX + 4, ptY - 4, 4, 4, '#2E7D32');
+  roundRect(ctx, ptX, ptY + 16, 12, 10, 3, '#D84315');
+  roundRect(ctx, ptX - 1, ptY + 15, 14, 2, 1, '#BF360C');
+  roundRect(ctx, ptX + 3, ptY + 8, 6, 8, 2, '#4CAF50');
+  ctx.fillStyle = '#388E3C';
+  ctx.beginPath(); ctx.arc(ptX + 6, ptY + 4, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#43A047';
+  ctx.beginPath(); ctx.arc(ptX + 1, ptY + 6, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(ptX + 10, ptY + 5, 4, 0, Math.PI * 2); ctx.fill();
 
-  // Wall art
+  // Wall art — simple framed rectangles
   const posterX = bx + 100, posterY = 10;
-  drawRect(ctx, posterX, posterY, 30, 22, '#37474F');
-  drawRect(ctx, posterX + 2, posterY + 2, 26, 18, '#263238');
-  drawRect(ctx, posterX + 4, posterY + 4, 22, 14, '#1a1a2e');
+  setShadow(ctx, 2, 0, 1);
+  roundRect(ctx, posterX, posterY, 30, 22, 3, '#37474F');
+  clearShadow(ctx);
+  roundRect(ctx, posterX + 2, posterY + 2, 26, 18, 2, '#263238');
   ctx.fillStyle = '#7C4DFF';
-  ctx.font = 'bold 7px monospace';
+  ctx.font = `bold 8px ${FONT}`;
   ctx.textAlign = 'center';
-  ctx.fillText('RELAX', posterX + 15, posterY + 12);
+  ctx.textBaseline = 'middle';
+  ctx.fillText('RELAX', posterX + 15, posterY + 11);
 
-  // Second poster lower
   const p2X = bx + 160, p2Y = 470;
-  drawRect(ctx, p2X, p2Y, 30, 22, '#37474F');
-  drawRect(ctx, p2X + 2, p2Y + 2, 26, 18, '#263238');
-  drawRect(ctx, p2X + 4, p2Y + 4, 22, 14, '#1a1a2e');
+  setShadow(ctx, 2, 0, 1);
+  roundRect(ctx, p2X, p2Y, 30, 22, 3, '#37474F');
+  clearShadow(ctx);
+  roundRect(ctx, p2X + 2, p2Y + 2, 26, 18, 2, '#263238');
   ctx.fillStyle = '#00BCD4';
-  ctx.fillText('CHILL', p2X + 15, p2Y + 12);
+  ctx.font = `bold 8px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('CHILL', p2X + 15, p2Y + 11);
 }
 
-// Draw corridor tiles — polished floor with subtle pattern and lighting
-function drawCorridorTiles(ctx: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number) {
-  const tileA = '#C4BDB5';
-  const tileB = '#B8B0A8';
-  const tileSize = 20;
-  // Base
-  ctx.fillStyle = tileA;
+// ─── Corridor drawing (flat vector) ─────────────────────────────────────────
+
+function drawCorridorFill(ctx: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number) {
+  // Solid light gray fill — no tiles or checkerboard
+  ctx.fillStyle = '#E0DAD2';
   ctx.fillRect(rx, ry, rw, rh);
-  // Checkerboard tiles
-  for (let x = rx; x < rx + rw; x += tileSize) {
-    for (let y = ry; y < ry + rh; y += tileSize) {
-      if ((Math.floor((x - rx) / tileSize) + Math.floor((y - ry) / tileSize)) % 2 === 0) {
-        drawRect(ctx, x, y, Math.min(tileSize, rx + rw - x), Math.min(tileSize, ry + rh - y), tileB);
-      }
-      // Tile grout
-      drawRect(ctx, x, y, Math.min(tileSize, rx + rw - x), 1, 'rgba(0,0,0,0.04)');
-      drawRect(ctx, x, y, 1, Math.min(tileSize, ry + rh - y), 'rgba(0,0,0,0.04)');
-    }
-  }
-  // Center guide line (like real office corridors)
-  ctx.fillStyle = 'rgba(139,92,246,0.08)';
-  if (rw > rh) {
-    ctx.fillRect(rx, ry + rh / 2 - 1, rw, 2);
-  } else {
-    ctx.fillRect(rx + rw / 2 - 1, ry, 2, rh);
-  }
-  // Edge shadow for depth
-  ctx.fillStyle = 'rgba(0,0,0,0.06)';
-  if (rw > rh) {
-    ctx.fillRect(rx, ry, rw, 2);
-    ctx.fillRect(rx, ry + rh - 2, rw, 2);
-  } else {
-    ctx.fillRect(rx, ry, 2, rh);
-    ctx.fillRect(rx + rw - 2, ry, 2, rh);
-  }
+  // Subtle 1px border
+  ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1);
 }
 
 function drawCorridors(ctx: CanvasRenderingContext2D) {
   // Horizontal corridors (extend to break room)
   for (let row = 0; row < ROWS - 1; row++) {
     const cy = (row + 1) * ROOM_H + row * CORRIDOR;
-    drawCorridorTiles(ctx, 0, cy, BREAK_ROOM_X, CORRIDOR);
+    drawCorridorFill(ctx, 0, cy, BREAK_ROOM_X, CORRIDOR);
   }
   // Vertical corridors between office columns
   for (let col = 0; col < COLS - 1; col++) {
     const cx = (col + 1) * ROOM_W + col * CORRIDOR;
-    drawCorridorTiles(ctx, cx, 0, CORRIDOR, GRID_H);
+    drawCorridorFill(ctx, cx, 0, CORRIDOR, GRID_H);
   }
   // Break room corridor (vertical, right of grid)
-  drawCorridorTiles(ctx, GRID_W, 0, CORRIDOR, H);
+  drawCorridorFill(ctx, GRID_W, 0, CORRIDOR, H);
 }
 
-// ─── Character drawing (same as original) ───────────────────────────────────
+// ─── Character drawing (flat vector) ─────────────────────────────────────────
 interface AgentAnim {
   label: string; name: string; emoji: string; state: string; detail: string;
   x: number; y: number; targetX: number; targetY: number;
@@ -974,76 +931,75 @@ interface VisitorAnim {
 const VISITOR_SHIRT_COLORS = ['#2196F3','#FF9800','#4CAF50','#E91E63','#9C27B0','#00BCD4','#FF5722','#607D8B'];
 const VISITOR_SKIN_COLORS = ['#FFCC80','#D4A574','#FFE0BD','#C68642','#8D5524','#F1C27D'];
 
-function drawVisitorCharacter(ctx: CanvasRenderingContext2D, v: VisitorAnim, time: number) {
+function drawVisitorCharacter(ctx: CanvasRenderingContext2D, v: VisitorAnim, _time: number) {
   const { x, y, shirtColor, skinColor, isWalking, walkFrame, bobOffset, avatarImg, avatarLoaded } = v;
   const baseY = y + Math.floor(bobOffset);
 
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  ctx.fillRect(x - 4, y + 20, 12, 3);
+  // Soft shadow beneath
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.beginPath();
+  ctx.ellipse(x + 2, y + 21, 7, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   const legOffset = isWalking ? [[-1, 1], [1, -1], [1, -1], [-1, 1]][walkFrame % 4] : [0, 0];
 
-  // Legs (jeans blue to differentiate from agents)
-  drawRect(ctx, x - 2, baseY + 14, 3, 6 + legOffset[0], '#1a5276');
-  drawRect(ctx, x + 3, baseY + 14, 3, 6 + legOffset[1], '#1a5276');
-  // Shoes
-  drawRect(ctx, x - 3, baseY + 19 + legOffset[0], 4, 2, '#2c3e50');
-  drawRect(ctx, x + 2, baseY + 19 + legOffset[1], 4, 2, '#2c3e50');
+  // Legs (jeans blue — small circles)
+  ctx.fillStyle = '#1a5276';
+  ctx.beginPath(); ctx.arc(x, baseY + 18 + legOffset[0], 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 4, baseY + 18 + legOffset[1], 2.5, 0, Math.PI * 2); ctx.fill();
 
-  // Body / shirt
-  drawRect(ctx, x - 3, baseY + 6, 10, 9, shirtColor);
-  drawRect(ctx, x - 2, baseY + 7, 8, 1, lighten(shirtColor, 25));
+  // Body / shirt — rounded rectangle
+  roundRect(ctx, x - 3, baseY + 6, 10, 10, 3, shirtColor);
 
   // Arms
-  drawRect(ctx, x - 5, baseY + 7, 3, 6, shirtColor);
-  drawRect(ctx, x + 6, baseY + 7, 3, 6, shirtColor);
+  roundRect(ctx, x - 5, baseY + 7, 3, 6, 1.5, shirtColor);
+  roundRect(ctx, x + 6, baseY + 7, 3, 6, 1.5, shirtColor);
   // Hands
-  drawRect(ctx, x - 5, baseY + 12, 3, 2, skinColor);
-  drawRect(ctx, x + 6, baseY + 12, 3, 2, skinColor);
+  ctx.fillStyle = skinColor;
+  ctx.beginPath(); ctx.arc(x - 4, baseY + 13, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 7, baseY + 13, 1.5, 0, Math.PI * 2); ctx.fill();
 
   // Head
   if (avatarLoaded && avatarImg) {
-    // Draw Slack avatar as head (circular crop effect via clipping)
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x + 2, baseY + 1, 6, 0, Math.PI * 2);
+    ctx.arc(x + 2, baseY + 1, 7, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(avatarImg, x - 4, baseY - 5, 12, 12);
+    ctx.drawImage(avatarImg, x - 5, baseY - 6, 14, 14);
     ctx.restore();
-    // Border around avatar
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(x + 2, baseY + 1, 6, 0, Math.PI * 2);
+    ctx.arc(x + 2, baseY + 1, 7, 0, Math.PI * 2);
     ctx.stroke();
   } else {
-    // Default pixel head with different shape (rounder, no hair — distinguishes from agents)
-    drawRect(ctx, x - 3, baseY - 2, 10, 9, skinColor);
-    drawRect(ctx, x - 2, baseY - 1, 8, 7, lighten(skinColor, 15));
-    // Eyes
-    drawRect(ctx, x - 1, baseY + 2, 2, 2, '#1a1a2e');
-    drawRect(ctx, x + 3, baseY + 2, 2, 2, '#1a1a2e');
-    // Smile
-    drawRect(ctx, x, baseY + 5, 4, 1, darken(skinColor, 30));
-    // Simple cap (to differentiate from agents)
-    drawRect(ctx, x - 4, baseY - 3, 12, 3, shirtColor);
-    drawRect(ctx, x - 3, baseY - 4, 10, 2, darken(shirtColor, 20));
+    // Circle head
+    ctx.fillStyle = skinColor;
+    ctx.beginPath(); ctx.arc(x + 2, baseY + 1, 8, 0, Math.PI * 2); ctx.fill();
+    // Eyes — 2 small dots
+    ctx.fillStyle = '#1a1a2e';
+    ctx.beginPath(); ctx.arc(x, baseY + 1, 1.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 4, baseY + 1, 1.2, 0, Math.PI * 2); ctx.fill();
+    // Simple cap (to differentiate)
+    ctx.fillStyle = shirtColor;
+    ctx.beginPath();
+    ctx.arc(x + 2, baseY - 3, 7, Math.PI, 0);
+    ctx.fill();
   }
 
-  // Slack/surface badge icon above head
+  // Badge icon (S/W) above head
   const badgeColor = v.surface === 'slack' ? '#4A154B' : '#2196F3';
-  drawRect(ctx, x - 1, baseY - 10, 6, 6, badgeColor);
-  drawRect(ctx, x, baseY - 9, 4, 4, lighten(badgeColor, 40));
-  // "S" or "W" letter
+  ctx.fillStyle = badgeColor;
+  ctx.beginPath(); ctx.arc(x + 2, baseY - 10, 4, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 5px monospace';
+  ctx.font = `bold 5px ${FONT}`;
   ctx.textAlign = 'center';
-  ctx.fillText(v.surface === 'slack' ? 'S' : 'W', x + 2, baseY - 5);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(v.surface === 'slack' ? 'S' : 'W', x + 2, baseY - 10);
 }
 
 function drawCharacter(ctx: CanvasRenderingContext2D, agent: AgentAnim, time: number) {
-  const { x, y, shirtColor, hairColor, hairStyle, isWalking, walkFrame, bobOffset, state, errorTimer } = agent;
+  const { x, y, shirtColor, hairColor, isWalking, walkFrame, bobOffset, state, errorTimer } = agent;
   const baseY = y + Math.floor(bobOffset);
   let jumpY = 0;
   if (state === 'error' && errorTimer > 0) {
@@ -1051,74 +1007,83 @@ function drawCharacter(ctx: CanvasRenderingContext2D, agent: AgentAnim, time: nu
   }
   const dy = baseY + jumpY;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  ctx.fillRect(x - 4, y + 20, 12, 3);
+  // Soft shadow beneath
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.beginPath();
+  ctx.ellipse(x + 2, y + 21, 7, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   const legOffset = isWalking ? [[-1, 1], [1, -1], [1, -1], [-1, 1]][walkFrame % 4] : [0, 0];
 
-  drawRect(ctx, x - 2, dy + 14, 3, 6 + legOffset[0], '#3b3b5c');
-  drawRect(ctx, x + 3, dy + 14, 3, 6 + legOffset[1], '#3b3b5c');
-  drawRect(ctx, x - 3, dy + 19 + legOffset[0], 4, 2, '#1a1a2e');
-  drawRect(ctx, x + 2, dy + 19 + legOffset[1], 4, 2, '#1a1a2e');
+  // Legs — small circles, animate for walking
+  ctx.fillStyle = '#3b3b5c';
+  ctx.beginPath(); ctx.arc(x, dy + 18 + legOffset[0], 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 4, dy + 18 + legOffset[1], 2.5, 0, Math.PI * 2); ctx.fill();
 
-  drawRect(ctx, x - 3, dy + 6, 10, 9, shirtColor);
-  drawRect(ctx, x - 2, dy + 7, 8, 1, lighten(shirtColor, 20));
+  // Body — rounded rectangle
+  roundRect(ctx, x - 3, dy + 6, 10, 10, 3, shirtColor);
 
+  // Arms
   const armAnim = ACTIVE_STATES.has(state) ? Math.sin(time * 0.008) * 2 : 0;
-  drawRect(ctx, x - 5, dy + 7 + Math.floor(armAnim), 3, 6, shirtColor);
-  drawRect(ctx, x + 6, dy + 7 - Math.floor(armAnim), 3, 6, shirtColor);
-  drawRect(ctx, x - 5, dy + 12 + Math.floor(armAnim), 3, 2, '#FFCC80');
-  drawRect(ctx, x + 6, dy + 12 - Math.floor(armAnim), 3, 2, '#FFCC80');
+  roundRect(ctx, x - 5, dy + 7 + Math.floor(armAnim), 3, 6, 1.5, shirtColor);
+  roundRect(ctx, x + 6, dy + 7 - Math.floor(armAnim), 3, 6, 1.5, shirtColor);
+  // Hands
+  ctx.fillStyle = '#FFCC80';
+  ctx.beginPath(); ctx.arc(x - 4, dy + 13 + Math.floor(armAnim), 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 7, dy + 13 - Math.floor(armAnim), 1.5, 0, Math.PI * 2); ctx.fill();
 
-  drawRect(ctx, x - 3, dy - 2, 10, 9, '#FFCC80');
-  drawRect(ctx, x - 2, dy - 1, 8, 7, '#FFD699');
-  drawRect(ctx, x - 1, dy + 2, 2, 2, '#1a1a2e');
-  drawRect(ctx, x + 3, dy + 2, 2, 2, '#1a1a2e');
-  drawRect(ctx, x - 1, dy + 2, 1, 1, '#444');
-  drawRect(ctx, x + 3, dy + 2, 1, 1, '#444');
+  // Head — circle (skin color, 8px radius)
+  ctx.fillStyle = '#FFCC80';
+  ctx.beginPath(); ctx.arc(x + 2, dy + 1, 8, 0, Math.PI * 2); ctx.fill();
 
+  // Eyes — 2 small dots
+  ctx.fillStyle = '#1a1a2e';
+  ctx.beginPath(); ctx.arc(x, dy + 1, 1.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 4, dy + 1, 1.2, 0, Math.PI * 2); ctx.fill();
+
+  // Mouth
   if (state === 'error') {
-    drawRect(ctx, x + 1, dy + 5, 2, 1, '#C62828');
+    // Sad mouth
+    ctx.strokeStyle = '#C62828';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x + 2, dy + 6, 2, Math.PI + 0.3, -0.3);
+    ctx.stroke();
   } else {
-    drawRect(ctx, x, dy + 5, 4, 1, '#BF8B5E');
+    ctx.strokeStyle = '#BF8B5E';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x + 2, dy + 3, 2, 0.3, Math.PI - 0.3);
+    ctx.stroke();
   }
 
-  switch (hairStyle) {
-    case 0:
-      drawRect(ctx, x - 3, dy - 4, 10, 3, hairColor);
-      drawRect(ctx, x - 3, dy - 2, 2, 3, hairColor);
-      drawRect(ctx, x + 5, dy - 2, 2, 3, hairColor);
-      break;
-    case 1:
-      drawRect(ctx, x - 4, dy - 5, 12, 4, hairColor);
-      drawRect(ctx, x - 4, dy - 2, 2, 5, hairColor);
-      drawRect(ctx, x + 6, dy - 2, 2, 5, hairColor);
-      drawRect(ctx, x - 2, dy - 1, 4, 2, hairColor);
-      break;
-    case 2:
-      drawRect(ctx, x - 2, dy - 8, 8, 7, hairColor);
-      drawRect(ctx, x, dy - 9, 4, 2, hairColor);
-      break;
-    case 3:
-      drawRect(ctx, x - 3, dy - 5, 10, 4, hairColor);
-      drawRect(ctx, x - 4, dy - 6, 3, 2, hairColor);
-      drawRect(ctx, x + 1, dy - 7, 3, 2, hairColor);
-      drawRect(ctx, x + 5, dy - 6, 3, 2, hairColor);
-      break;
-  }
+  // Hair — colored semicircle on top of head
+  ctx.fillStyle = hairColor;
+  ctx.beginPath();
+  ctx.arc(x + 2, dy - 2, 8, Math.PI, 0);
+  ctx.fill();
 
+  // Error exclamation mark
   if (state === 'error') {
-    drawRect(ctx, x + 1, dy - 14, 2, 6, '#ef4444');
-    drawRect(ctx, x + 1, dy - 7, 2, 2, '#ef4444');
+    ctx.fillStyle = '#ef4444';
+    ctx.font = `bold 12px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('!', x + 2, dy - 10);
   }
 
-  if (agent.hovered) {
-    ctx.fillStyle = hexToRgba(STATE_COLORS[state] || '#fff', 0.12);
-    ctx.fillRect(x - 8, dy - 12, 20, 36);
+  // State indicator — colored ring around character
+  if (agent.hovered || state !== 'idle') {
+    const stateColor = STATE_COLORS[state] || '#fff';
+    ctx.strokeStyle = hexToRgba(stateColor, 0.35);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + 2, dy + 6, 14, 0, Math.PI * 2);
+    ctx.stroke();
   }
 }
 
-// ─── Thought bubbles from monitors ──────────────────────────────────────────
+// ─── Thought bubbles (flat vector) ──────────────────────────────────────────
 function wrapText(text: string, maxChars: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
@@ -1139,9 +1104,9 @@ function drawThoughtBubble(ctx: CanvasRenderingContext2D, monitorX: number, moni
   if (!text) return;
 
   const lines = wrapText(text, 40);
-  const lineH = 12;
-  const padding = 6;
-  ctx.font = 'bold 10px monospace';
+  const lineH = 13;
+  const padding = 8;
+  ctx.font = `10px ${FONT}`;
   let maxW = 0;
   for (const line of lines) {
     const w = ctx.measureText(line).width;
@@ -1154,60 +1119,44 @@ function drawThoughtBubble(ctx: CanvasRenderingContext2D, monitorX: number, moni
   const bx = monitorX - bw / 2;
   const by = monitorY - bh - 20 + bobY;
 
-  // Fade in effect based on time
   const alpha = Math.min(1, (time % 10000) / 500);
   ctx.globalAlpha = alpha;
 
   // Trailing circles (thought bubble style)
-  const circlePositions = [
-    { x: monitorX, y: monitorY - 4, r: 2 },
-    { x: monitorX - 3, y: monitorY - 10, r: 3 },
-    { x: monitorX - 5, y: monitorY - 17 + bobY * 0.5, r: 4 },
-  ];
-  for (const c of circlePositions) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(Math.floor(c.x), Math.floor(c.y), c.r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath(); ctx.arc(monitorX, monitorY - 4, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(monitorX - 3, monitorY - 10, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(monitorX - 5, monitorY - 17 + bobY * 0.5, 4, 0, Math.PI * 2); ctx.fill();
 
-  // Cloud bubble
-  const r = 6;
-  ctx.fillStyle = color;
+  // White rounded rectangle with subtle shadow
+  setShadow(ctx, 6, 0, 2, 'rgba(0,0,0,0.12)');
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.beginPath();
-  ctx.moveTo(bx + r, by);
-  ctx.lineTo(bx + bw - r, by);
-  ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
-  ctx.lineTo(bx + bw, by + bh - r);
-  ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
-  ctx.lineTo(bx + r, by + bh);
-  ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
-  ctx.lineTo(bx, by + r);
-  ctx.quadraticCurveTo(bx, by, bx + r, by);
+  ctx.roundRect(bx, by, bw, bh, 6);
   ctx.fill();
+  clearShadow(ctx);
 
-  // Inner lighter fill
-  ctx.fillStyle = lighten(color, 15);
-  ctx.fillRect(Math.floor(bx + 2), Math.floor(by + 2), bw - 4, bh - 4);
+  // Colored left border accent
+  roundRect(ctx, bx, by, 3, bh, 1.5, color);
 
   // Text
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 10px monospace';
+  ctx.fillStyle = '#333';
+  ctx.font = `10px ${FONT}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], Math.floor(bx + padding), Math.floor(by + padding + i * lineH));
+    ctx.fillText(lines[i], bx + padding, by + padding + i * lineH);
   }
 
   ctx.globalAlpha = 1;
 }
 
-// ─── Speech bubbles for chat (pointed tail style) ──────────────────────────
+// ─── Speech bubbles (flat vector, pointed triangle tail) ────────────────────
 function drawSpeechBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, color: string) {
   const lines = wrapText(text, 30);
-  const lineH = 10;
-  const padding = 5;
-  ctx.font = 'bold 8px monospace';
+  const lineH = 12;
+  const padding = 6;
+  ctx.font = `9px ${FONT}`;
   let maxW = 0;
   for (const line of lines) {
     const w = ctx.measureText(line).width;
@@ -1218,29 +1167,36 @@ function drawSpeechBubble(ctx: CanvasRenderingContext2D, x: number, y: number, t
   const bx = Math.floor(x - bw / 2);
   const by = Math.floor(y - bh - 8);
 
-  // Bubble body
-  drawRect(ctx, bx, by, bw, bh, color);
-  drawRect(ctx, bx + 1, by + 1, bw - 2, bh - 2, lighten(color, 15));
+  // White rounded rectangle with subtle shadow
+  setShadow(ctx, 5, 0, 2, 'rgba(0,0,0,0.10)');
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 5);
+  ctx.fill();
+  clearShadow(ctx);
 
-  // Pointed tail (triangle)
-  ctx.fillStyle = color;
+  // Colored left border accent
+  roundRect(ctx, bx, by + 2, 3, bh - 4, 1.5, color);
+
+  // Pointed triangle tail
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.beginPath();
   ctx.moveTo(x - 4, by + bh);
   ctx.lineTo(x, by + bh + 6);
   ctx.lineTo(x + 4, by + bh);
+  ctx.closePath();
   ctx.fill();
 
   // Text
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 8px monospace';
+  ctx.fillStyle = '#333';
+  ctx.font = `9px ${FONT}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], Math.floor(bx + padding), Math.floor(by + padding + i * lineH));
+    ctx.fillText(lines[i], bx + padding, by + padding + i * lineH);
   }
 }
 
-// ─── Minimap ────────────────────────────────────────────────────────────────
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function PixelOffice({ agents, conversations = [], visitors = [] }: { agents: AgentState[]; conversations?: Conversation[]; visitors?: SlackVisitor[] }) {
@@ -1280,7 +1236,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     for (const v of anim.visitors) {
       if (!currentIds.has(v.id) && v.chatState !== 'leaving') {
         v.chatState = 'leaving';
-        // Walk off screen to the left
         v.waypoints = [{ x: -30, y: v.y }];
         v.waypointIndex = 0;
         v.targetX = v.waypoints[0].x;
@@ -1291,7 +1246,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     // Add or update visitors
     for (const sv of visitors) {
       const prev = existing.get(sv.id);
-      // Find the agent index for this visitor's target
       const agentIdx = agents.findIndex(a => a.label === sv.targetAgent);
       const targetRoom = agentIdx >= 0 ? agentIdx : 0;
 
@@ -1299,7 +1253,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         prev.targetAgentLabel = sv.targetAgent;
         prev.targetRoomIndex = targetRoom;
         prev.name = sv.name;
-        // Load avatar if URL changed
         if (sv.avatarUrl && sv.avatarUrl !== prev.avatarUrl) {
           prev.avatarUrl = sv.avatarUrl;
           prev.avatarLoaded = false;
@@ -1332,24 +1285,20 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         avatarImg: null, avatarLoaded: false, avatarUrl: sv.avatarUrl,
       };
 
-      // Build path: enter via a horizontal corridor, then walk to agent's room
       const targetRow = Math.floor(targetRoom / COLS);
-      const targetCol = targetRoom % COLS;
       const door = getDoorPos(targetRoom);
-      // Enter on the corridor closest to the target room
       const entryCorridorRow = targetRow < ROWS - 1 ? targetRow : targetRow - 1;
       const corridorCenterY = hCorridorY(entryCorridorRow);
       newVisitor.waypoints = [
-        { x: 0, y: corridorCenterY },                  // Enter from left edge on corridor
-        { x: door.x, y: corridorCenterY },             // Walk along corridor to door
-        { x: door.x, y: door.y },                      // Enter through door
-        { x: chairPos.x + 25, y: chairPos.y + 10 },   // Stand near agent
+        { x: 0, y: corridorCenterY },
+        { x: door.x, y: corridorCenterY },
+        { x: door.x, y: door.y },
+        { x: chairPos.x + 25, y: chairPos.y + 10 },
       ];
       newVisitor.waypointIndex = 0;
       newVisitor.targetX = newVisitor.waypoints[0].x;
       newVisitor.targetY = newVisitor.waypoints[0].y;
 
-      // Load avatar image if available
       if (sv.avatarUrl) {
         const img = new Image();
         img.crossOrigin = 'anonymous';
@@ -1376,8 +1325,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
 
       if (prev) {
         const stateChanged = prev.state !== a.state;
-        // Don't change target unless state actually changed
-        // In break room? Keep break room position. At desk? Keep desk position.
         let targetX = prev.targetX;
         let targetY = prev.targetY;
         if (stateChanged && prev.chatState === 'at_desk') {
@@ -1485,7 +1432,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
       for (const a of anim.agents) {
         if (a.conversationId && !activeConvIds.has(a.conversationId)) {
           if (a.chatState === 'chatting') {
-            // Walk home
             a.chatState = 'walking_home';
             const homeChair = getChairPos(a.roomIndex);
             a.waypoints = getCorridorWaypoints(a.chatTarget, a.roomIndex);
@@ -1494,7 +1440,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
             a.targetX = a.waypoints[0].x;
             a.targetY = a.waypoints[0].y;
           } else if (a.chatState === 'walking_to_chat') {
-            // Abort, walk home
             a.chatState = 'walking_home';
             const homeChair = getChairPos(a.roomIndex);
             a.waypoints = [homeChair];
@@ -1515,19 +1460,16 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         const a2 = agentMap.get(label2);
         if (!a1 || !a2) continue;
 
-        // Lower index stays, higher index visits
         const stayer = a1.roomIndex < a2.roomIndex ? a1 : a2;
         const visitor = a1.roomIndex < a2.roomIndex ? a2 : a1;
 
-        if (visitor.conversationId === conv.id) continue; // Already handling
-        if (visitor.chatState !== 'at_desk') continue; // Busy
+        if (visitor.conversationId === conv.id) continue;
+        if (visitor.chatState !== 'at_desk') continue;
 
-        // Start the visitor walking
         visitor.conversationId = conv.id;
         visitor.chatState = 'walking_to_chat';
         visitor.chatTarget = stayer.roomIndex;
         visitor.waypoints = getCorridorWaypoints(visitor.roomIndex, stayer.roomIndex);
-        // Final position: near the stayer
         const stayerChair = getChairPos(stayer.roomIndex);
         visitor.waypoints.push({ x: stayerChair.x + 20, y: stayerChair.y + 10 });
         visitor.waypointIndex = 0;
@@ -1536,7 +1478,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         visitor.chatMessageIndex = 0;
         visitor.chatTimer = 0;
 
-        // Mark stayer too
         stayer.conversationId = conv.id;
         stayer.chatMessageIndex = 0;
         stayer.chatTimer = 0;
@@ -1547,7 +1488,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         const isIdle = a.state === 'idle';
         const isBusy = ACTIVE_STATES.has(a.state) || a.state === 'error';
 
-        // Only trigger transitions when state ACTUALLY changed (not every frame)
         if (isIdle && a.chatState === 'at_desk' && !a.conversationId && !a.isWalking) {
           a.chatState = 'walking_to_break';
           const seat = getBreakRoomSeat(a.roomIndex);
@@ -1558,7 +1498,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
             a.targetY = a.waypoints[0].y;
           }
         } else if (isBusy && a.chatState === 'in_break_room') {
-          // Only from in_break_room — not walking_to_break (let them finish walking first)
           a.chatState = 'walking_from_break';
           a.waypoints = getReturnFromBreakWaypoints(a.roomIndex, a.x, a.y);
           if (a.waypoints.length > 0) {
@@ -1570,8 +1509,8 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
       }
 
       // ─── Update agents ───
-      const WALK_SPEED = 1.6; // pixels per frame, consistent pace
-      const CORNER_RADIUS = 12; // start turning this many px before a waypoint
+      const WALK_SPEED = 1.6;
+      const CORNER_RADIUS = 12;
 
       for (const a of anim.agents) {
         const dx = a.targetX - a.x;
@@ -1581,22 +1520,18 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         if (dist > 1) {
           a.isWalking = true;
 
-          // Check if we're approaching a corner — if next waypoint exists and
-          // changes direction, start curving toward it early
           const isTransit = a.chatState === 'walking_to_chat' || a.chatState === 'walking_home'
             || a.chatState === 'walking_to_break' || a.chatState === 'walking_from_break';
           let moveX = (dx / dist) * WALK_SPEED;
           let moveY = (dy / dist) * WALK_SPEED;
 
           if (isTransit && dist < CORNER_RADIUS && a.waypointIndex < a.waypoints.length - 1) {
-            // Approaching a waypoint with more to go — blend toward next waypoint
             const nextWp = a.waypoints[a.waypointIndex + 1];
             if (nextWp) {
               const ndx = nextWp.x - a.targetX;
               const ndy = nextWp.y - a.targetY;
               const ndist = Math.sqrt(ndx * ndx + ndy * ndy);
               if (ndist > 0) {
-                // Blend factor: 0 at CORNER_RADIUS, 1 at waypoint
                 const blend = 1 - (dist / CORNER_RADIUS);
                 const nextDirX = ndx / ndist;
                 const nextDirY = ndy / ndist;
@@ -1616,7 +1551,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           a.x += moveX;
           a.y += moveY;
 
-          // Walk animation frame
           a.walkTimer += dt;
           if (a.walkTimer > 120) {
             a.walkFrame = (a.walkFrame + 1) % 4;
@@ -1627,7 +1561,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           a.x = a.targetX;
           a.y = a.targetY;
 
-          // Waypoint progression
           const isTransit = a.chatState === 'walking_to_chat' || a.chatState === 'walking_home'
             || a.chatState === 'walking_to_break' || a.chatState === 'walking_from_break';
           if (isTransit && a.waypoints.length > 0) {
@@ -1636,7 +1569,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
               a.targetX = a.waypoints[a.waypointIndex].x;
               a.targetY = a.waypoints[a.waypointIndex].y;
             } else {
-              // Arrived at destination
               if (a.chatState === 'walking_to_chat') {
                 a.chatState = 'chatting';
                 a.chatTimer = 0;
@@ -1648,7 +1580,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
                 a.targetX = homeChair.x;
                 a.targetY = homeChair.y;
               } else {
-                // walking_home
                 a.chatState = 'at_desk';
                 a.conversationId = null;
                 const homeChair = getChairPos(a.roomIndex);
@@ -1692,7 +1623,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
         if (dist > 1) {
           v.isWalking = true;
 
-          // Corner rounding — blend toward next waypoint when close to current
           let moveX = (dx / dist) * VISITOR_SPEED;
           let moveY = (dy / dist) * VISITOR_SPEED;
 
@@ -1724,7 +1654,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           v.x = v.targetX;
           v.y = v.targetY;
 
-          // Waypoint progression
           if (v.waypoints.length > 0 && v.waypointIndex < v.waypoints.length - 1) {
             v.waypointIndex++;
             v.targetX = v.waypoints[v.waypointIndex].x;
@@ -1741,14 +1670,17 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
 
       // ─── Draw ───
       if (!canvas) return;
-      // Use virtual dimensions (transform already applied by resize handler)
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
 
-      // Background
-      ctx.fillStyle = '#E8E0D4';
+      // Background — soft gradient (light sky to white)
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+      bgGrad.addColorStop(0, '#E8F4FD');
+      bgGrad.addColorStop(0.4, '#F0EDE8');
+      bgGrad.addColorStop(1, '#E8E4DE');
+      ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, W, H);
 
       // Draw corridors first (behind rooms)
@@ -1765,7 +1697,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           const isError = agent.state === 'error';
           drawRoom(ctx, i, agent.label, agent.name, agent.emoji, glowColor, isError, timestamp);
         } else {
-          // Empty room
           drawRoom(ctx, i, `room${i}`, `Room ${i}`, '', undefined, false, timestamp);
         }
       }
@@ -1795,9 +1726,9 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           }
         }
 
-        // Name label (always visible when hovered or when not in corridor)
+        // Name label
         if (agent.hovered || agent.chatState === 'at_desk') {
-          drawPixelText(ctx, `${agent.emoji} ${agent.name}`, agent.x + 2, agent.y + 22, '#fff', 8);
+          drawCleanText(ctx, `${agent.emoji} ${agent.name}`, agent.x + 2, agent.y + 22, '#555', 9);
         }
       }
 
@@ -1808,7 +1739,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
 
         // Name label
         const badgeIcon = v.surface === 'slack' ? '#' : '@';
-        drawPixelText(ctx, `${badgeIcon}${v.name}`, v.x + 2, v.y + 22, '#81D4FA', 7);
+        drawCleanText(ctx, `${badgeIcon}${v.name}`, v.x + 2, v.y + 22, '#5C9BC8', 8);
 
         // Speech bubble when chatting
         if (v.chatState === 'chatting') {
@@ -1834,7 +1765,6 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
       const dpr = window.devicePixelRatio || 1;
       const cw = container.clientWidth;
       const ch = container.clientHeight || (cw * H / W);
-      // Scale to fit container width, maintain aspect ratio
       const scale = cw / W;
       const displayW = cw;
       const displayH = H * scale;
@@ -1853,7 +1783,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
   }, [isFullscreen]);
 
   return (
-    <div ref={containerRef} className={`w-full relative ${isFullscreen ? 'bg-[#E8E0D4]' : ''}`}>
+    <div ref={containerRef} className={`w-full relative ${isFullscreen ? 'bg-[#F0EDE8]' : ''}`}>
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}
