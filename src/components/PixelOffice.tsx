@@ -88,10 +88,16 @@ function getMonitorPos(roomIndex: number): { x: number; y: number } {
   return { x: o.x + 104, y: o.y + 71 };
 }
 
-// Room door center (bottom wall, center)
+// Door position — 0.5 units INTO the corridor so agents clear the doorframe
 function getDoorPos(roomIndex: number): { x: number; y: number } {
   const o = getRoomOrigin(roomIndex);
-  return { x: o.x + ROOM_W / 2, y: o.y + ROOM_H };
+  return { x: o.x + ROOM_W / 2, y: o.y + ROOM_H + 8 };
+}
+
+// Interior door — just inside the room near the door
+function getInsideDoorPos(roomIndex: number): { x: number; y: number } {
+  const o = getRoomOrigin(roomIndex);
+  return { x: o.x + ROOM_W / 2, y: o.y + ROOM_H - 8 };
 }
 
 // ─── Corridor center coordinate helpers ──────────────────────────────────────
@@ -115,129 +121,119 @@ interface NavNode {
 
 const navGraph = new Map<string, NavNode>();
 
+function nid(x: number, y: number): string {
+  return `${Math.round(x)},${Math.round(y)}`;
+}
+
 function buildNavGraph() {
   navGraph.clear();
 
-  const addNode = (id: string, x: number, y: number) => {
+  const ensure = (x: number, y: number): string => {
+    const id = nid(x, y);
     if (!navGraph.has(id)) navGraph.set(id, { id, x, y, neighbors: [] });
+    return id;
   };
-  const addEdge = (a: string, b: string) => {
-    const na = navGraph.get(a)!, nb = navGraph.get(b)!;
+  const connect = (a: string, b: string) => {
+    if (a === b) return;
+    const na = navGraph.get(a), nb = navGraph.get(b);
+    if (!na || !nb) return;
     if (!na.neighbors.includes(b)) na.neighbors.push(b);
     if (!nb.neighbors.includes(a)) nb.neighbors.push(a);
   };
 
-  // Door nodes for each room
+  // 1. Room nodes: chair <-> insideDoor <-> door(corridor)
   for (let i = 0; i < COLS * ROWS; i++) {
-    const door = getDoorPos(i);
-    addNode(`door_${i}`, door.x, door.y);
+    const c = getChairPos(i);
+    const id = getInsideDoorPos(i);
+    const d = getDoorPos(i);
+    const chairId = ensure(c.x, c.y);
+    const insideId = ensure(id.x, id.y);
+    const doorId = ensure(d.x, d.y);
+    connect(chairId, insideId);
+    connect(insideId, doorId);
   }
 
-  // Corridor intersection nodes — at every crossing of h-corridor and v-corridor
-  // Plus door-to-corridor connections
+  // 2. Horizontal corridors
   for (let row = 0; row < ROWS - 1; row++) {
     const cy = hCorridorY(row);
+    const nodesOnCorridor: string[] = [];
 
-    // Nodes along this horizontal corridor at each door position and v-corridor crossing
-    const hNodes: string[] = [];
-
-    // Door projections onto this h-corridor (rooms above: row, and below: row+1)
     for (let col = 0; col < COLS; col++) {
-      // Room above (row r) — door is at bottom, corridor is right below
+      // Room above — project door onto corridor
       const roomAbove = row * COLS + col;
       const doorAbove = getDoorPos(roomAbove);
-      const hId = `hc_${row}_door_${roomAbove}`;
-      addNode(hId, doorAbove.x, cy);
-      addEdge(`door_${roomAbove}`, hId);
-      hNodes.push(hId);
+      const projId = ensure(doorAbove.x, cy);
+      nodesOnCorridor.push(projId);
+      connect(nid(doorAbove.x, doorAbove.y), projId);
 
-      // Room below (row r+1) — door is at bottom, corridor is above
+      // Room below — connect its door to this corridor too
       const roomBelow = (row + 1) * COLS + col;
       const doorBelow = getDoorPos(roomBelow);
-      if (row + 1 < ROWS - 1) {
-        // roomBelow connects to corridor row+1, not this one
-      } else {
-        // roomBelow is in the last row — connect its door to this corridor (above it)
-        const hIdBelow = `hc_${row}_door_${roomBelow}`;
-        addNode(hIdBelow, doorBelow.x, cy);
-        // Door of bottom-row room: need to walk up to the corridor
-        addEdge(`door_${roomBelow}`, hIdBelow);
-        hNodes.push(hIdBelow);
-      }
+      const projBelowId = ensure(doorBelow.x, cy);
+      if (!nodesOnCorridor.includes(projBelowId)) nodesOnCorridor.push(projBelowId);
+      // Connect via intermediate node at top of room below
+      const topOfBelow = Math.floor(roomBelow / COLS) * (ROOM_H + CORRIDOR);
+      const topId = ensure(doorBelow.x, topOfBelow);
+      connect(projBelowId, topId);
+      connect(topId, nid(doorBelow.x, doorBelow.y));
     }
 
-    // V-corridor intersection nodes
+    // V-corridor intersections
     for (let col = 0; col < COLS - 1; col++) {
-      const cx = vCorridorX(col);
-      const intId = `int_${row}_${col}`;
-      addNode(intId, cx, cy);
-      hNodes.push(intId);
+      nodesOnCorridor.push(ensure(vCorridorX(col), cy));
     }
 
-    // Break room corridor intersection (rightmost)
-    const breakCorrX = GRID_W + CORRIDOR / 2;
-    const breakIntId = `int_${row}_break`;
-    addNode(breakIntId, breakCorrX, cy);
-    hNodes.push(breakIntId);
+    // Break room corridor extension
+    const breakExtId = ensure(BREAK_ROOM_X, cy);
+    nodesOnCorridor.push(breakExtId);
 
-    // Connect all h-corridor nodes horizontally (sort by x, connect adjacent)
-    hNodes.sort((a, b) => navGraph.get(a)!.x - navGraph.get(b)!.x);
-    for (let j = 0; j < hNodes.length - 1; j++) {
-      addEdge(hNodes[j], hNodes[j + 1]);
+    // Sort by X and connect adjacent
+    const unique = Array.from(new Set(nodesOnCorridor));
+    const sorted = unique.map(id => navGraph.get(id)!).filter(Boolean).sort((a, b) => a.x - b.x);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      connect(sorted[i].id, sorted[i + 1].id);
     }
   }
 
-  // Connect v-corridor intersections vertically
+  // 3. Vertical corridors
   for (let col = 0; col < COLS - 1; col++) {
+    const cx = vCorridorX(col);
     for (let row = 0; row < ROWS - 2; row++) {
-      addEdge(`int_${row}_${col}`, `int_${row + 1}_${col}`);
+      connect(nid(cx, hCorridorY(row)), nid(cx, hCorridorY(row + 1)));
     }
   }
 
-  // Connect break room corridor vertically
+  // 4. Break room corridor vertical
   for (let row = 0; row < ROWS - 2; row++) {
-    addEdge(`int_${row}_break`, `int_${row + 1}_break`);
+    connect(nid(BREAK_ROOM_X, hCorridorY(row)), nid(BREAK_ROOM_X, hCorridorY(row + 1)));
   }
 
-  // Connect rooms in row+1..row+2..etc doors to the corridor above them
-  for (let row = 1; row < ROWS; row++) {
-    const cyAbove = hCorridorY(row - 1);
-    for (let col = 0; col < COLS; col++) {
-      const room = row * COLS + col;
-      const door = getDoorPos(room);
-      if (row - 1 >= 0 && row < ROWS) {
-        const existingId = `hc_${row - 1}_door_${room}`;
-        if (!navGraph.has(existingId)) {
-          addNode(existingId, door.x, cyAbove);
-          addEdge(`door_${room}`, existingId);
-          const col_left = col > 0 ? col - 1 : -1;
-          const col_right = col < COLS - 1 ? col : -1;
-          if (col_left >= 0 && navGraph.has(`int_${row - 1}_${col_left}`)) {
-            addEdge(existingId, `int_${row - 1}_${col_left}`);
-          }
-          if (col_right >= 0 && navGraph.has(`int_${row - 1}_${col_right}`)) {
-            addEdge(existingId, `int_${row - 1}_${col_right}`);
-          }
-          for (let c2 = 0; c2 < COLS; c2++) {
-            const otherId = `hc_${row - 1}_door_${(row - 1) * COLS + c2}`;
-            if (navGraph.has(otherId)) addEdge(existingId, otherId);
-            const otherId2 = `hc_${row - 1}_door_${row * COLS + c2}`;
-            if (navGraph.has(otherId2) && otherId2 !== existingId) addEdge(existingId, otherId2);
-          }
-          if (navGraph.has(`int_${row - 1}_break`)) {
-            addEdge(existingId, `int_${row - 1}_break`);
-          }
-        }
-      }
+  // 5. Break room interior nodes
+  const breakEntryId = ensure(BREAK_ROOM_X + 40, GRID_H / 2);
+  for (let row = 0; row < ROWS - 1; row++) {
+    connect(nid(BREAK_ROOM_X, hCorridorY(row)), breakEntryId);
+  }
+  for (let bx = 1; bx <= 3; bx++) {
+    for (let by = 0; by < 3; by++) {
+      const nodeX = BREAK_ROOM_X + bx * 60;
+      const nodeY = 40 + by * (GRID_H / 3);
+      const id = ensure(nodeX, nodeY);
+      connect(id, breakEntryId);
+      if (bx > 1) connect(id, nid(BREAK_ROOM_X + (bx - 1) * 60, nodeY));
+      if (by > 0) connect(id, nid(nodeX, 40 + (by - 1) * (GRID_H / 3)));
     }
   }
 
-  // Break room entry node
-  const breakEntryId = 'break_entry';
-  addNode(breakEntryId, GRID_W + CORRIDOR / 2, GRID_H / 2);
-  // Connect to all break corridor intersections
-  for (let row = 0; row < ROWS - 1; row++) {
-    addEdge(breakEntryId, `int_${row}_break`);
+  // 6. Additional corridor connections for bottom-row rooms
+  // Bottom row rooms connect to the last corridor above them
+  if (ROWS > 1) {
+    const lastCY = hCorridorY(ROWS - 2);
+    for (let col = 0; col < COLS; col++) {
+      const room = (ROWS - 1) * COLS + col;
+      const door = getDoorPos(room);
+      const projId = ensure(door.x, lastCY);
+      connect(nid(door.x, door.y), projId);
+    }
   }
 }
 
@@ -257,9 +253,8 @@ function aStar(startX: number, startY: number, endX: number, endY: number): { x:
     if (de < bestEndDist) { bestEndDist = de; bestEndId = id; }
   });
 
-  if (!bestStartId || !bestEndId || bestStartId === bestEndId) {
-    return [{ x: endX, y: endY }];
-  }
+  if (!bestStartId || !bestEndId) return [];
+  if (bestStartId === bestEndId) return [{ x: endX, y: endY }];
 
   const openList = [bestStartId];
   const closedSet: Record<string, boolean> = {};
@@ -314,16 +309,43 @@ function aStar(startX: number, startY: number, endX: number, endY: number): { x:
     }
   }
 
-  // No path found — fallback direct
-  return [{ x: endX, y: endY }];
+  // No path found — return empty (caller handles with pathTo)
+  return [];
 }
 
-// ─── Convenience pathfinding functions using A* ──────────────────────────────
-function getCorridorWaypoints(fromRoom: number, toRoom: number): { x: number; y: number }[] {
-  const fromDoor = getDoorPos(fromRoom);
-  const toDoor = getDoorPos(toRoom);
-  const path = aStar(fromDoor.x, fromDoor.y, toDoor.x, toDoor.y);
+// ─── Safe pathfinding wrapper — never walks through walls ────────────────────
+function pathTo(fromX: number, fromY: number, toX: number, toY: number): { x: number; y: number }[] {
+  const path = aStar(fromX, fromY, toX, toY);
+  const dest = { x: toX, y: toY };
+  if (path.length === 0) {
+    // Find nearest graph node as intermediate
+    let bestNode: { x: number; y: number } | null = null;
+    let bestDist = Infinity;
+    navGraph.forEach((node) => {
+      const d = Math.hypot(node.x - toX, node.y - toY);
+      if (d < bestDist) { bestDist = d; bestNode = { x: node.x, y: node.y }; }
+    });
+    if (bestNode) return [bestNode, dest];
+    return [dest];
+  }
+  // Always append exact destination
+  path.push(dest);
   return path;
+}
+
+function setWaypoints(entity: { waypoints: {x:number;y:number}[]; waypointIndex: number; targetX: number; targetY: number }, wp: {x:number;y:number}[]) {
+  entity.waypoints = wp;
+  entity.waypointIndex = 0;
+  if (wp.length > 0) {
+    entity.targetX = wp[0].x;
+    entity.targetY = wp[0].y;
+  }
+}
+
+function getCorridorWaypoints(fromRoom: number, toRoom: number): { x: number; y: number }[] {
+  const fromChair = getChairPos(fromRoom);
+  const toChair = getChairPos(toRoom);
+  return pathTo(fromChair.x, fromChair.y, toChair.x, toChair.y);
 }
 
 function getRoomDecorations(label: string): [DecorationType, DecorationType] {
@@ -741,13 +763,13 @@ function getBreakRoomSeat(agentIndex: number): { x: number; y: number } {
 }
 
 function getBreakRoomWaypoints(fromRoom: number, seatPos: { x: number; y: number }): { x: number; y: number }[] {
-  const door = getDoorPos(fromRoom);
-  return aStar(door.x, door.y, seatPos.x, seatPos.y);
+  const chair = getChairPos(fromRoom);
+  return pathTo(chair.x, chair.y, seatPos.x, seatPos.y);
 }
 
 function getReturnFromBreakWaypoints(toRoom: number, currentX: number, currentY: number): { x: number; y: number }[] {
   const chair = getChairPos(toRoom);
-  return aStar(currentX, currentY, chair.x, chair.y);
+  return pathTo(currentX, currentY, chair.x, chair.y);
 }
 
 function drawBreakRoom(ctx: CanvasRenderingContext2D, time: number) {
@@ -1236,10 +1258,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
     for (const v of anim.visitors) {
       if (!currentIds.has(v.id) && v.chatState !== 'leaving') {
         v.chatState = 'leaving';
-        v.waypoints = [{ x: -30, y: v.y }];
-        v.waypointIndex = 0;
-        v.targetX = v.waypoints[0].x;
-        v.targetY = v.waypoints[0].y;
+        setWaypoints(v, pathTo(v.x, v.y, -30, v.y));
       }
     }
 
@@ -1442,10 +1461,7 @@ export default function PixelOffice({ agents, conversations = [], visitors = [] 
           } else if (a.chatState === 'walking_to_chat') {
             a.chatState = 'walking_home';
             const homeChair = getChairPos(a.roomIndex);
-            a.waypoints = [homeChair];
-            a.waypointIndex = 0;
-            a.targetX = homeChair.x;
-            a.targetY = homeChair.y;
+            setWaypoints(a, pathTo(a.x, a.y, homeChair.x, homeChair.y));
           }
           if (a.chatState === 'at_desk') {
             a.conversationId = null;
